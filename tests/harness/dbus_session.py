@@ -137,9 +137,22 @@ def assert_isolated(env: Mapping[str, str], root: Path) -> None:
     address = env.get("DBUS_SESSION_BUS_ADDRESS")
     if address is not None:
         expected = f"unix:path={_bus_socket(root)}"
-        if not address.startswith(expected):
+        if not _is_sandbox_address(address, _bus_socket(root)):
             msg = f"DBUS_SESSION_BUS_ADDRESS={address!r} is not the sandbox bus {expected}"
             raise IsolationError(msg)
+
+
+def _is_sandbox_address(address: str, socket: Path) -> bool:
+    # Parsed, not prefix-matched: an address may carry `;` fallbacks or a duplicate `path=`
+    # (clients honour the last one), either of which could route to the real bus.
+    transport, _, options = address.partition(":")
+    if transport != "unix" or ";" in address:
+        return False
+    pairs = [option.partition("=") for option in options.split(",")]
+    keys = [key for key, _, _ in pairs]
+    if len(keys) != len(set(keys)) or not set(keys) <= {"path", "guid"}:
+        return False
+    return {key: value for key, _, value in pairs}.get("path") == str(socket)
 
 
 def _run_sync[T](coro_factory: Callable[[], Coroutine[object, object, T]]) -> T:
