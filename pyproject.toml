@@ -1,0 +1,157 @@
+[build-system]
+requires = ["hatchling>=1.27"]
+build-backend = "hatchling.build"
+
+[project]
+name = "passwords-app"
+version = "0.1.0"
+description = "Two-way iCloud Keychain sync for Linux: GNOME Keyring, a native Passwords app, and browser autofill"
+readme = "README.md"
+license = "MIT"
+license-files = ["LICENSE", "THIRD_PARTY_NOTICES.md"]
+requires-python = ">=3.13"
+authors = [{ name = "Alex Mextner" }]
+classifiers = [
+    "Environment :: X11 Applications :: GTK",
+    "Operating System :: POSIX :: Linux",
+    "Programming Language :: Python :: 3.13",
+    "Programming Language :: Python :: 3.14",
+    "Topic :: Security",
+]
+dependencies = [
+    "cryptography>=44",
+    "dbus-fast>=2.44",
+    "publicsuffixlist>=1.0.2",
+    "pynacl>=1.5",
+    "requests>=2.32",
+    "secretstorage>=3.3",
+    "srp>=1.0.21",
+    "zxcvbn>=4.5",
+]
+
+[project.urls]
+Homepage = "https://github.com/alex-mextner/passwords-app"
+Issues = "https://github.com/alex-mextner/passwords-app/issues"
+
+[project.scripts]
+passwords-app = "passwords_app.icloud.cli.app:main"
+
+[dependency-groups]
+dev = [
+    "bandit[toml]>=1.8",
+    "codespell>=2.4",
+    "coverage[toml]>=7.8",
+    "deptry>=0.23",
+    "hypothesis>=6.130",
+    "mypy>=1.16",
+    "pip-audit>=2.9",
+    "playwright>=1.52",
+    "pyright>=1.1.400",
+    "pytest>=8.4",
+    "pytest-asyncio>=1.0",
+    "pytest-benchmark>=5.1",
+    "pytest-cov>=6.1",
+    "pytest-timeout>=2.4",
+    "pytest-xdist>=3.7",
+    "reuse>=5.0",
+    "ruff>=0.12",
+    "selenium>=4.33",
+    "semgrep>=1.120",
+    "types-requests>=2.32",
+    "vulture>=2.14",
+    "xenon>=0.9",
+    "yamllint>=1.37",
+]
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/passwords_app"]
+
+[tool.hatch.build.targets.wheel.shared-data]
+"data/dbus/io.github.alex_mextner.Passwords1.xml" = "share/dbus-1/interfaces/io.github.alex_mextner.Passwords1.xml"
+
+# ---------------------------------------------------------------- tests
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = ["-ra", "--strict-markers", "--strict-config", "--import-mode=importlib"]
+asyncio_mode = "auto"
+asyncio_default_fixture_loop_scope = "function"
+timeout = 120
+xfail_strict = true
+filterwarnings = ["error"]
+markers = [
+    "integration: needs a private D-Bus session and gnome-keyring",
+    "e2e: full stack against the fake CloudKit server",
+    "gui: drives the GTK app (headless gnome-shell)",
+    "browser: drives real Firefox/Chrome",
+    "live: talks to the real iCloud account (opt-in: PASSWORDS_APP_LIVE=1)",
+    "benchmark: performance budget",
+]
+
+[tool.coverage.run]
+branch = true
+source = ["passwords_app"]
+parallel = true
+
+[tool.coverage.report]
+show_missing = true
+skip_covered = true
+exclude_also = ["if TYPE_CHECKING:", "raise NotImplementedError", "\\.\\.\\.$"]
+
+# ---------------------------------------------------------------- lint
+[tool.ruff]
+line-length = 100
+target-version = "py313"
+src = ["src", "tests"]
+
+[tool.ruff.lint]
+select = ["ALL"]
+ignore = [
+    "COM812",  # conflicts with the formatter
+    "CPY001",  # copyright headers are enforced by `reuse lint`
+    "D100", "D101", "D102", "D103", "D104", "D105", "D107",  # docstring presence: required only where behavior is non-obvious
+    "D203", "D213",  # mutually exclusive with D211/D212
+]
+
+[tool.ruff.lint.per-file-ignores]
+"tests/**" = ["S101", "PLR2004", "D", "ANN401", "SLF001", "INP001", "FBT001", "ARG001"]
+
+[tool.ruff.lint.pydocstyle]
+convention = "pep257"
+
+[tool.ruff.lint.flake8-tidy-imports]
+ban-relative-imports = "parents"
+
+[tool.mypy]
+python_version = "3.13"
+strict = true
+files = ["src", "tests"]
+mypy_path = "src"
+warn_unreachable = true
+enable_error_code = ["ignore-without-code", "redundant-expr", "truthy-bool", "possibly-undefined", "explicit-override"]
+
+[[tool.mypy.overrides]]
+module = ["srp.*", "zxcvbn.*", "publicsuffixlist.*", "secretstorage.*"]
+ignore_missing_imports = true
+
+[tool.pyright]
+include = ["src"]
+pythonVersion = "3.13"
+typeCheckingMode = "strict"
+reportMissingTypeStubs = false
+
+[tool.bandit]
+exclude_dirs = ["tests"]
+
+[tool.codespell]
+skip = "*.lock,*.svg,*.po,./extension/node_modules,./.venv"
+ignore-words-list = "acct,ser,srvr,ptcl,sdmn,agrp"
+
+[tool.vulture]
+paths = ["src"]
+min_confidence = 80
+
+[tool.deptry]
+known_first_party = ["passwords_app"]
+
+[tool.deptry.per_rule_ignores]
+DEP001 = ["gi"]
