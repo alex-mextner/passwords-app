@@ -21,6 +21,7 @@ classifiers = [
 dependencies = [
     "cryptography>=44",
     "dbus-fast>=2.44",
+    "idna>=3.7",
     "publicsuffixlist>=1.0.2",
     "pynacl>=1.5",
     "requests>=2.32",
