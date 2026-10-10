@@ -6,14 +6,12 @@ import logging
 import plistlib as plist
 
 import requests
-import urllib3
 
 from .anisette import Anisette
 from .device import Device
 from .headers import identity_headers
 from ..errors import AppleError
 
-urllib3.disable_warnings()
 logger = logging.getLogger(__name__)
 
 LOGIN_DELEGATES_URL = "https://setup.icloud.com/setup/iosbuddy/loginDelegates"
@@ -56,7 +54,7 @@ def login_mobileme(username: str, pet: str, adsid: str, client_id: str,
     headers.update(identity_headers(device, anisette))
     headers["Authorization"] = _basic(username, pet)  # apple-id:PET (NOT dsid:PET)
 
-    resp = requests.post(url, headers=headers, data=body, verify=False, timeout=20)
+    resp = requests.post(url, headers=headers, data=body, timeout=20)
     logger.debug("loginDelegates -> HTTP %s (%d bytes)", resp.status_code, len(resp.content))
     data = plist.loads(resp.content)
 
@@ -90,7 +88,7 @@ def fetch_account_settings(record: dict, device: Device, anisette: Anisette,
     }
     headers.update(identity_headers(device, anisette))
 
-    resp = requests.post(url, headers=headers, data="", verify=False, timeout=20)
+    resp = requests.post(url, headers=headers, data="", timeout=20)
     logger.debug("get_account_settings -> HTTP %s (%d bytes)",
                  resp.status_code, len(resp.content))
     return resp.status_code, plist.loads(resp.content)
