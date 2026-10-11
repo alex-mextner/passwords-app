@@ -18,14 +18,16 @@ if TYPE_CHECKING:
 support.safe_environment()
 
 
+def _in_app_suite(item: pytest.Item) -> bool:
+    return "tests/gui/" in str(item.path).replace("\\", "/")
+
+
 # tryfirst: xdist's loadgroup reads the xdist_group marker in its own modifyitems hook.
 @pytest.hookimpl(tryfirst=True)
 def pytest_collection_modifyitems(items: list[pytest.Item]) -> None:
-    # Sessions are serialized machine-wide; keep every GUI test on one xdist worker.
     for item in items:
-        if "tests/gui/" in str(item.path).replace("\\", "/"):
+        if _in_app_suite(item):
             item.add_marker(pytest.mark.gui)
-            item.add_marker(pytest.mark.xdist_group("gnome-shell"))
             # PyGObject's main-loop override touches asyncio policy APIs that Python 3.14
             # deprecates; that is the library's concern, not a defect in the app.
             item.add_marker(
@@ -33,6 +35,15 @@ def pytest_collection_modifyitems(items: list[pytest.Item]) -> None:
                     r"ignore:'asyncio\.\w+' is deprecated:DeprecationWarning"
                 )
             )
+        if item.get_closest_marker("gui") is not None:
+            # Sessions are serialized machine-wide; keep every GUI test (the harness's own
+            # too) on one xdist worker instead of queueing on the lock until a timeout.
+            item.add_marker(pytest.mark.xdist_group("gnome-shell"))
+    # The app's session-scoped `shell` holds the machine-wide session lock until the run
+    # ends, and a second holder in the same process blocks forever (flock is per open file).
+    # Run the app suite last, so module-scoped sessions elsewhere (tests/harness) have
+    # already stopped and released the lock when it starts.
+    items.sort(key=_in_app_suite)
 
 
 @pytest.fixture(scope="session")
