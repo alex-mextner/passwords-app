@@ -1,0 +1,47 @@
+{
+  "extName": { "message": "Пароли для Linux" },
+  "extDescription": {
+    "message": "Подставляет и сохраняет пароли и коды подтверждения из Связки ключей iCloud в Linux через приложение «Пароли»."
+  },
+  "actionTitle": { "message": "Пароли" },
+  "dropdownLabel": { "message": "Сохранённые пароли" },
+  "noUsername": { "message": "Без имени пользователя" },
+  "useStrongPassword": { "message": "Надёжный пароль" },
+  "strongPasswordHint": { "message": "Сохранится в «Паролях» после отправки формы" },
+  "verificationCode": { "message": "Код подтверждения" },
+  "codeFrom": {
+    "message": "Из записи $TITLE$",
+    "placeholders": { "title": { "content": "$1" } }
+  },
+  "saveTitle": { "message": "Сохранить этот пароль?" },
+  "updateTitle": { "message": "Обновить сохранённый пароль?" },
+  "promptBody": {
+    "message": "Он будет храниться в Связке ключей iCloud на всех ваших устройствах."
+  },
+  "save": { "message": "Сохранить" },
+  "update": { "message": "Обновить" },
+  "notNow": { "message": "Не сейчас" },
+  "never": { "message": "Никогда для этого сайта" },
+  "searchPlaceholder": { "message": "Поиск" },
+  "clearSearch": { "message": "Очистить поиск" },
+  "noMatches": { "message": "Для этого сайта нет сохранённых паролей" },
+  "noResults": { "message": "Ничего не найдено" },
+  "notAWebPage": { "message": "Откройте сайт, чтобы увидеть его пароли" },
+  "fill": { "message": "Вставить" },
+  "fillCode": { "message": "Вставить код" },
+  "secondsLeft": {
+    "message": "$SECONDS$ с",
+    "placeholders": { "seconds": { "content": "$1" } }
+  },
+  "hostUnavailable": { "message": "Приложение «Пароли» не подключено к этому браузеру" },
+  "daemonUnavailable": { "message": "Служба «Пароли» не запущена" },
+  "stateIdle": { "message": "Синхронизировано с iCloud" },
+  "stateSyncing": { "message": "Синхронизация…" },
+  "statePaused": { "message": "Синхронизация приостановлена — откройте «Пароли»" },
+  "stateOffline": { "message": "Нет сети — изменения синхронизируются позже" },
+  "stateSignedOut": { "message": "Войдите в iCloud в приложении «Пароли»" },
+  "stateSigninRequired": { "message": "Войдите снова в приложении «Пароли»" },
+  "stateError": { "message": "Проблема с синхронизацией — откройте «Пароли»" },
+  "locked": { "message": "Разблокируйте связку ключей, чтобы использовать пароли" },
+  "genericError": { "message": "Что-то пошло не так. Попробуйте ещё раз." }
+}

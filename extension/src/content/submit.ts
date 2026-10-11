@@ -68,6 +68,8 @@ export interface ObserveOptions {
   readonly isTrusted?: (event: Event) => boolean;
   /** Milliseconds clock used for de-duplication; tests inject a fake one. */
   readonly now?: () => number;
+  /** Enter in this field belongs to another widget (the open dropdown picks with it). */
+  readonly enterConsumed?: (field: HTMLInputElement) => boolean;
 }
 
 function eventTarget(event: Event): EventTarget | null {
@@ -171,7 +173,7 @@ export function observeSubmissions(
     if (!isTrusted(event) || !(event instanceof KeyboardEvent)) return;
     if (event.key !== "Enter" || event.isComposing) return;
     const target = eventTarget(event);
-    if (!isInputElement(target)) return;
+    if (!isInputElement(target) || options.enterConsumed?.(target) === true) return;
     report(
       getForms().find((form) => form.password === target || form.newPasswords.includes(target)),
     );
