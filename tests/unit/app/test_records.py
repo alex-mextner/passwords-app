@@ -115,6 +115,12 @@ def test_item_from_wire_absent_optional_keys_default() -> None:
     assert item.has_code is False
     assert item.password is None
     assert item.otpauth is None
+    assert item.sync_problem == ""
+
+
+def test_item_from_wire_reads_the_sync_problem() -> None:
+    item = Item.from_wire({"id": "x", "sync_problem": "refused"})
+    assert item.sync_problem == "refused"
 
 
 def test_item_from_wire_ignores_unknown_keys() -> None:

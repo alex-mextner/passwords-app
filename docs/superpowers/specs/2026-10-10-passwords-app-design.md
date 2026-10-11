@@ -116,9 +116,9 @@ Guards (never bypassed silently):
   `idle` (not `offline`) and the status message names the login, a notification fires once per
   refused version saying the password stays on this computer only, and it is withdrawn once a
   complete cycle no longer finds the login refused (accepted after an edit, or deleted). The
-  item is retried with its own backoff (2 min doubling to 6 h; at once after an edit). The
-  item dicts carry no per-item flag for this: the D-Bus contract only exposes it through the
-  status message and the notification.
+  item is retried with its own backoff (2 min doubling to 6 h; at once after an edit). Its
+  item dict's read-only `sync_problem` carries the plain-language reason until iCloud stores
+  it or it is deleted (§7), so the app can mark it "On this computer only".
 
 Trash: every item removed from either side, and every conflict loser, is stored encrypted in
 state.db with `deleted_at`, `reason`, and origin for **90 days** (setting, default 90), then
@@ -178,6 +178,12 @@ a{sv}`, `SignInCode(s code) → a{sv}`, `ListRecoveryDevices() → aa{sv}`,
 `JoinKeychain(s device_id, s passcode) → a{sv}`, `SignOut()`.
 Signals: `StatusChanged(a{sv})`, `ItemsChanged(as ids)`.
 
+Item dicts carry `sync_problem s`: "" while the item syncs, otherwise the plain-language reason
+iCloud refuses to store it (e.g. "another password for this website and username already
+exists"). It is read-only (Save accepts and ignores it), set from the last complete cycle (an
+interrupted one only adds refusals), cleared on sign-out, and `ItemsChanged` names an item
+whenever it changes.
+
 Status `state` ∈ `signed-out | syncing | idle | paused | offline | signin-required | error`.
 
 ## 8. App UX (GTK4 + libadwaita ≥ 1.8)
@@ -197,7 +203,10 @@ Bar: Apple Passwords (macOS 26). Above it where marked ★.
 - Delete → toast with Undo; Deleted view with Restore / Delete now.
 - Security: weak, reused, ★ compromised (opt-in HIBP k-anonymity: only 5 hex chars of SHA-1 leave the machine).
 - Sync status in header (synced / syncing / paused / offline / sign-in required) with details
-  popover and *Sync now*; `Adw.Banner` for pause and sign-in.
+  popover and *Sync now*; `Adw.Banner` for pause and sign-in. While iCloud refuses any
+  password (its `sync_problem`, §7), "Synced" becomes a warning ("Not All Synced") and the
+  popover counts them; such a password's row carries an "On this computer only" badge and its
+  detail a banner with the reason.
 - Sign-in wizard: Apple ID → 2FA code (6 boxes, paste-aware) → "Confirm with a device
   passcode": plain-language explanation (Apple keeps your keychain keys sealed with the screen
   passcode of each of your devices; entering one device's passcode lets this computer join),

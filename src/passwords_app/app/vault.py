@@ -133,6 +133,10 @@ class Vault(GObject.Object):
     def count_group(self, group: str) -> int:
         return sum(1 for o in self._by_id.values() if o.item.group == group)
 
+    def count_refused(self) -> int:
+        """Passwords iCloud refuses to store, which stay on this computer only."""
+        return sum(1 for o in self._by_id.values() if o.item.sync_problem)
+
     # ---------------------------------------------------------------- loading
     def schedule_reload(self, *, items: bool = True) -> None:
         """Coalesce bursts of ItemsChanged (a sync cycle may emit many) into one reload.

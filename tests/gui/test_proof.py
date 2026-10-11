@@ -109,13 +109,30 @@ def _scenes(app: support.AppUnderTest) -> list[tuple[str, Any]]:
         ("deleted", deleted),
         ("new-password", new_password),
         ("preferences", preferences),
+        ("local-only", lambda: _local_only(app, detail)),
+        ("local-only-status", w.status_button.popup),
         ("pause", pause),
     ]
+
+
+def _local_only(app: support.AppUnderTest, detail: Any) -> None:
+    """Let iCloud refuse Contoso ID, then show its detail (badge, banner, header warning)."""
+    from passwords_app.sync.remote_icloud import DUPLICATE_LOGIN  # noqa: PLC0415
+
+    item_id = next(
+        c.id for c in app.call(lambda d: list(d.items.values())) if c.title == "Contoso ID"
+    )
+    app.call(lambda d: d.refuse(item_id, DUPLICATE_LOGIN))
+    support.wait_until(lambda: app.vault.count_refused() == 1, what="refusal reloaded")
+    detail()
+    app.window.list_page.select_id(item_id)
+    support.wait_until(app.window.detail.local_banner.get_revealed, what="banner")
 
 
 def _close_dialogs(app: support.AppUnderTest) -> None:
     w = app.window
     w.cancel_edit()
+    w.status_button.popdown()
     for _ in range(3):
         dialog = w.get_visible_dialog()
         if dialog is None:

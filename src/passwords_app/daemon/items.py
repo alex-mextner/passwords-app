@@ -43,11 +43,12 @@ ITEM_KEYS: Mapping[str, str] = {
     "created": _INT64,
     "modified": _INT64,
     "has_code": _BOOLEAN,
+    "sync_problem": _STRING,
     "password": _STRING,
     "otpauth": _STRING,
 }
 # Clients may echo a dict from Get back into Save; these are the daemon's bookkeeping.
-_READ_ONLY = frozenset({"created", "modified", "has_code"})
+_READ_ONLY = frozenset({"created", "modified", "has_code", "sync_problem"})
 _OPTIONAL_TEXT = ("title", "notes", "group", "otpauth")
 
 
@@ -61,7 +62,10 @@ def from_ms(ms: int) -> datetime:
     return datetime.fromtimestamp(ms / 1000, UTC)
 
 
-def item_dict(c: Credential, *, secrets: bool = False) -> dict[str, Variant]:
+def item_dict(
+    c: Credential, *, secrets: bool = False, sync_problem: str = ""
+) -> dict[str, Variant]:
+    """`sync_problem` is why iCloud refused to store this version ("" while it syncs)."""
     item = {
         "id": Variant("s", c.id),
         "url": Variant("s", c.url),
@@ -73,6 +77,7 @@ def item_dict(c: Credential, *, secrets: bool = False) -> dict[str, Variant]:
         "created": Variant("x", to_ms(c.created)),
         "modified": Variant("x", to_ms(c.modified)),
         "has_code": Variant("b", c.otpauth is not None),
+        "sync_problem": Variant("s", sync_problem),
     }
     if secrets:
         item["password"] = Variant("s", c.password)

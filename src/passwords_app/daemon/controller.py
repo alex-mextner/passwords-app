@@ -299,6 +299,8 @@ class Daemon:
         self._rejected_seen: frozenset[str] = frozenset()
         # Logins iCloud refused during the engine call in progress; announced after it.
         self._refused: dict[str, UploadFailure] = {}
+        # Why iCloud refuses each login it has not stored yet (the item dicts' sync_problem).
+        self._problems: dict[str, str] = {}
         self._alerts: set[str] = set()
         self._tasks: list[asyncio.Task[None]] = []
         # The keyring content the last cycle left behind (see echo.py), and the pending
@@ -491,6 +493,7 @@ class Daemon:
             self._apple_id = ""
         for topic in list(self._alerts):
             await self._withdraw(topic)
+        self._set_problems({})
         self._set("signed-out", MSG_SIGNED_OUT)
 
     # ------------------------------------------------------------------ cycles
@@ -531,6 +534,7 @@ class Daemon:
 
     async def _after(self, report: SyncReport, refused: Sequence[UploadFailure]) -> None:
         state, message = outcome(report)
+        self._note_problems(report)
         self._set(state, message)
         if state == "paused":
             await self._alert("pause", "Passwords sync is paused", message)
@@ -555,6 +559,26 @@ class Daemon:
         for topic in sorted(self._alerts):
             if topic.startswith(REFUSED_TOPIC) and topic not in waiting:
                 await self._withdraw(topic)
+
+    def sync_problem(self, item_id: str) -> str:
+        """Why iCloud refuses to store this login; "" while it syncs."""
+        return self._problems.get(item_id, "")
+
+    def _note_problems(self, report: SyncReport) -> None:
+        problems = {f.item_id: f.reason for f in report.upload_failures}
+        if report.skipped_reason is not None:
+            # An interrupted cycle did not look at every login: it can add refusals, not end them.
+            problems = self._problems | problems
+        self._set_problems(problems)
+
+    def _set_problems(self, problems: dict[str, str]) -> None:
+        """Replace the refusals; clients hear of each login whose sync_problem changed."""
+        previous, self._problems = self._problems, problems
+        changed = sorted(
+            i for i in previous.keys() | problems.keys() if previous.get(i) != problems.get(i)
+        )
+        if changed and self.on_items is not None:
+            self.on_items(changed)
 
     async def _report_rejected(self, report: SyncReport) -> None:
         refs = frozenset(r.ref for r in report.rejected)

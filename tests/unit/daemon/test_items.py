@@ -110,9 +110,16 @@ def test_item_dict_signatures_match_the_interface() -> None:
         "created": "x",
         "modified": "x",
         "has_code": "b",
+        "sync_problem": "s",
         "password": "s",
         "otpauth": "s",
     }
+
+
+def test_sync_problem_defaults_to_empty_and_carries_the_reason() -> None:
+    c = make_credential("A")
+    assert plain(item_dict(c))["sync_problem"] == ""
+    assert plain(item_dict(c, sync_problem="refused"))["sync_problem"] == "refused"
 
 
 def test_item_dict_maps_none_to_empty_strings() -> None:
@@ -172,6 +179,7 @@ def test_trash_dict_layout_and_expiry() -> None:
     assert "otpauth" not in item
     assert item["id"].value == "A"
     assert item["has_code"].value is True
+    assert item["sync_problem"].value == ""  # a deleted password is not waiting to upload
     assert SECRET_PW not in repr(d)
 
 
@@ -209,6 +217,7 @@ def test_unknown_keys_are_rejected(key: str) -> None:
         ("created", s("2026-01-01")),
         ("modified", Variant("t", 1)),
         ("has_code", s("true")),
+        ("sync_problem", Variant("b", False)),  # noqa: FBT003 - D-Bus boolean literal
     ],
 )
 def test_wrong_types_are_rejected(key: str, variant: Variant) -> None:
@@ -216,9 +225,10 @@ def test_wrong_types_are_rejected(key: str, variant: Variant) -> None:
         parse_edit({key: variant})
 
 
-@pytest.mark.parametrize("key", ["created", "modified", "has_code"])
+@pytest.mark.parametrize("key", ["created", "modified", "has_code", "sync_problem"])
 def test_read_only_keys_are_accepted_but_ignored(key: str) -> None:
-    value = Variant("b", True) if key == "has_code" else Variant("x", 0)  # noqa: FBT003
+    values = {"has_code": Variant("b", True), "sync_problem": s("refused")}  # noqa: FBT003
+    value = values.get(key, Variant("x", 0))
     c = create(**{key: value})
     assert c.created == NOW
     assert c.modified == NOW

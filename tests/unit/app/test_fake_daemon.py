@@ -66,6 +66,7 @@ ITEM_KEYS = {
     "created": "x",
     "modified": "x",
     "has_code": "b",
+    "sync_problem": "s",
 }
 STATUS_KEYS = {
     "state": "s",
@@ -448,10 +449,12 @@ async def test_save_accepts_and_ignores_read_only_keys(client: Client) -> None:
         created=Variant("x", 1),
         modified=Variant("x", 2),
         has_code=Variant("b", value=True),
+        sync_problem=Variant("s", "made up by a client"),
     )
     item = await client.call("Get", "s", item_id)
     assert item["created"] == ms(NOW)
     assert item["has_code"] is False
+    assert item["sync_problem"] == ""
 
 
 @pytest.mark.parametrize(
@@ -511,6 +514,36 @@ async def test_add_item_hook_signals_and_lists(fake: FakeDaemon, client: Client)
     assert await client.wait_for("ItemsChanged") == [item_id]
     (item,) = await client.call("List")
     assert item["group"] == "Family"
+
+
+async def test_refuse_and_accept_hooks_set_the_sync_problem(
+    fake: FakeDaemon, client: Client
+) -> None:
+    refused = fake.add_item("https://a.example", "bob", PW_A)
+    fine = fake.add_item("https://a.example", "ann", PW_B)
+    await client.settle()
+    client.signals.clear()
+    fake.refuse(refused, "another password for this website and username already exists")
+    assert await client.wait_for("ItemsChanged") == [refused]
+    status = await client.wait_for("StatusChanged")
+    assert status["state"] == "idle"
+    assert status["message"].startswith("iCloud did not accept the password for bob")
+    listed = {i["id"]: i["sync_problem"] for i in await client.call("List")}
+    assert listed == {
+        refused: "another password for this website and username already exists",
+        fine: "",
+    }
+    matched = {
+        i["id"]: i["sync_problem"] for i in await client.call("Match", "s", "https://a.example")
+    }
+    assert matched == listed
+    assert (await client.call("Get", "s", refused))["sync_problem"] == listed[refused]
+    await client.settle()
+    client.signals.clear()
+    fake.accept(refused)
+    assert await client.wait_for("ItemsChanged") == [refused]
+    assert (await client.call("Get", "s", refused))["sync_problem"] == ""
+    assert (await client.status())["message"] == ""
 
 
 # ---------------------------------------------------------------------- trash

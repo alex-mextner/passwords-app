@@ -24,6 +24,7 @@ from passwords_app.app.formatting import (
     status_detail,
     status_icon,
     status_title,
+    sync_problem_text,
     wrong_passcode_text,
 )
 from passwords_app.app.records import Status, SyncState, TrashReason
@@ -194,6 +195,32 @@ def test_every_state_has_a_distinct_symbolic_icon() -> None:
     icons = [status_icon(Status(state)) for state in SyncState]
     assert all(icon.endswith("-symbolic") for icon in icons)
     assert len(set(icons)) == len(SyncState)
+
+
+def test_refused_passwords_turn_synced_into_a_warning() -> None:
+    idle = Status(SyncState.IDLE)
+    assert status_title(idle, refused=True) == "Not All Synced"
+    assert status_icon(idle, refused=True) == "dialog-warning-symbolic"
+    assert status_icon(idle, refused=True) != status_icon(idle)
+
+
+@pytest.mark.parametrize("state", [s for s in SyncState if s is not SyncState.IDLE])
+def test_other_states_keep_their_title_and_icon_while_passwords_are_refused(
+    state: SyncState,
+) -> None:
+    status = Status(state)
+    assert status_title(status, refused=True) == status_title(status)
+    assert status_icon(status, refused=True) == status_icon(status)
+
+
+def test_sync_problem_text_translates_known_reasons_and_passes_others_through() -> None:
+    from passwords_app.sync.remote_icloud import DUPLICATE_LOGIN  # noqa: PLC0415
+
+    assert sync_problem_text(DUPLICATE_LOGIN) == (
+        "Another password for this website and username already exists."
+    )
+    other = "iCloud Keychain cannot store this login: not a website address"
+    assert sync_problem_text(other) == f"{other}."
 
 
 @pytest.mark.parametrize("state", list(SyncState))

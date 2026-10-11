@@ -222,7 +222,7 @@ async def test_get_is_the_only_way_to_secrets(client: Client, seeded: dict[str, 
 
 async def test_item_dict_keys_and_types(client: Client, seeded: dict[str, str]) -> None:
     item = await client.one("Get", "s", "ITEM")
-    assert {k: v.signature for k, v in item.items()} == {
+    keys = {
         "id": "s",
         "url": "s",
         "username": "s",
@@ -233,9 +233,13 @@ async def test_item_dict_keys_and_types(client: Client, seeded: dict[str, str]) 
         "created": "x",
         "modified": "x",
         "has_code": "b",
+        "sync_problem": "s",
         "password": "s",
         "otpauth": "s",
     }
+    assert {k: v.signature for k, v in item.items()} == keys
+    listed = {k: v.signature for k, v in (await client.one("List"))[0].items()}
+    assert listed == {k: t for k, t in keys.items() if k not in {"password", "otpauth"}}
 
 
 async def test_save_get_round_trip(client: Client) -> None:
@@ -453,7 +457,6 @@ async def test_offline_status(client: Client, running: RunningDaemon) -> None:
 async def test_a_login_icloud_refuses_is_explained_in_the_status(
     client: Client, running: RunningDaemon
 ) -> None:
-    # The contract has no per-item flag: the status message and a notification carry it.
     running.remote.reject("R", DUPLICATE_LOGIN)
     running.local.put(make_credential("R", url="https://example.com", username="bob"))
     await client.call("SyncNow")
@@ -465,18 +468,27 @@ async def test_a_login_icloud_refuses_is_explained_in_the_status(
     )
     await wait_for(lambda: client.signal_bodies("StatusChanged")[-1]["message"].value == message)
     assert running.notifier.topics() == ["refused:R"]
-    item = await client.one("Get", "s", "R")
-    assert set(item) == {
-        "id",
-        "url",
-        "username",
-        "title",
-        "notes",
-        "alt_urls",
-        "group",
-        "created",
-        "modified",
-        "has_code",
-        "password",
-        "otpauth",
-    }
+
+
+async def test_a_refused_login_carries_its_sync_problem(
+    client: Client, running: RunningDaemon
+) -> None:
+    running.remote.reject("R", DUPLICATE_LOGIN)
+    running.local.put(make_credential("R", url="https://example.com", username="bob"))
+    running.local.put(make_credential("OK", url="https://example.com", username="ann"))
+    await client.call("List")  # clients have seen both logins before the cycle
+    await client.call("SyncNow")
+    await wait_for(lambda: ["R"] in client.signal_bodies("ItemsChanged"))
+    problems = {i["id"].value: i["sync_problem"].value for i in await client.one("List")}
+    assert problems == {"R": DUPLICATE_LOGIN, "OK": ""}
+    assert (await client.one("Get", "s", "R"))["sync_problem"].value == DUPLICATE_LOGIN
+    assert (await client.one("Get", "s", "OK"))["sync_problem"].value == ""
+    matched = await client.one("Match", "s", "https://example.com/login")
+    assert {i["id"].value: i["sync_problem"].value for i in matched} == problems
+    # Read-only: a Get dict echoed back into Save keeps its sync_problem, which changes nothing.
+    item = await client.one("Get", "s", "OK")
+    item["sync_problem"] = s("made up by a client")
+    item["title"] = s("Renamed")
+    assert await client.one("Save", "a{sv}", item) == "OK"
+    saved = await client.one("Get", "s", "OK")
+    assert (saved["title"].value, saved["sync_problem"].value) == ("Renamed", "")

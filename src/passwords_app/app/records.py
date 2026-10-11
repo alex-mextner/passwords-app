@@ -100,6 +100,8 @@ class Item:
     created: datetime = _EPOCH
     modified: datetime = _EPOCH
     has_code: bool = False
+    # Why iCloud refuses to store this login ("" while it syncs); the daemon's wording.
+    sync_problem: str = ""
     password: str | None = field(default=None, repr=False)
     otpauth: str | None = field(default=None, repr=False)
 
@@ -122,6 +124,7 @@ class Item:
             created=from_unix_ms(_int(d, "created")) or _EPOCH,
             modified=from_unix_ms(_int(d, "modified")) or _EPOCH,
             has_code=_bool(d, "has_code") or bool(otpauth),
+            sync_problem=_str(d, "sync_problem"),
             password=password,
             otpauth=otpauth or None,
         )

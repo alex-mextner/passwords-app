@@ -48,11 +48,15 @@ class ItemRow(Gtk.Box):
         self.subtitle.add_css_class("caption")
         texts.append(self.title)
         texts.append(self.subtitle)
+        self.local_badge = Gtk.Label(
+            label=_("On this computer only"), visible=False, valign=Gtk.Align.CENTER
+        )
+        self.local_badge.add_css_class("local-only-badge")
         self.warning = Gtk.Image(icon_name="dialog-warning-symbolic", visible=False)
         self.warning.add_css_class("warning")
         self.code = Gtk.Label(visible=False)
         self.code.add_css_class("list-code")
-        for child in (self.tile, texts, self.warning, self.code):
+        for child in (self.tile, texts, self.local_badge, self.warning, self.code):
             self.append(child)
         self._ring: CountdownRing | None = None  # only Codes rows need one
         self.obj: ItemObject | None = None
@@ -80,7 +84,15 @@ class ItemRow(Gtk.Box):
             self.ring.set_visible(show_code)
         if show_code:
             self._fetch_code()
-        return f"{item.display_title}, {subtitle}"
+        return self._show_local_only(item.sync_problem, f"{item.display_title}, {subtitle}")
+
+    def _show_local_only(self, sync_problem: str, label: str) -> str:
+        """Badge a password iCloud refuses to store; returns `label` naming the badge too."""
+        self.local_badge.set_visible(bool(sync_problem))
+        self.local_badge.set_tooltip_text(
+            formatting.sync_problem_text(sync_problem) if sync_problem else None
+        )
+        return f"{label}, {self.local_badge.get_label()}" if sync_problem else label
 
     @property
     def ring(self) -> CountdownRing:

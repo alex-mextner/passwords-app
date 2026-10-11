@@ -297,6 +297,19 @@ def test_lookups(vault: Vault) -> None:
     assert vault.position_of("missing") is None
 
 
+def test_refused_passwords_are_counted(vault: Vault, fake: FakeDaemonThread) -> None:
+    target = vault.items.get_item(3)
+    assert target is not None
+    assert vault.count_refused() == 0
+    fake.call(lambda d: d.refuse(target.item.id, "refused by iCloud"))
+    wait_until(lambda: vault.count_refused() == 1, what="reload after ItemsChanged")
+    refused = vault.find(target.item.id)
+    assert refused is not None
+    assert refused.item.sync_problem == "refused by iCloud"
+    fake.call(lambda d: d.accept(target.item.id))
+    wait_until(lambda: vault.count_refused() == 0, what="reload after acceptance")
+
+
 def test_items_changed_burst_coalesces_into_one_list_call(
     vault: Vault, fake: FakeDaemonThread
 ) -> None:

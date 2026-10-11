@@ -679,7 +679,7 @@ class MainWindow(Adw.ApplicationWindow):
     # ---------------------------------------------------------------- vault events
     def _on_status(self) -> None:
         status = self.vault.status
-        self.status_button.show_status(status)
+        self.status_button.show_status(status, self.vault.count_refused())
         paused = status.state is SyncState.PAUSED
         self.list_page.pause_banner.set_title(formatting.pause_title(status))
         self.list_page.pause_banner.set_revealed(paused)
@@ -695,6 +695,8 @@ class MainWindow(Adw.ApplicationWindow):
         # The list page already re-filtered itself from the store's items-changed.
         self.sidebar.set_groups(self.vault.groups())
         self._update_counts()
+        # Refusals arrive as ItemsChanged: the header's "Synced" depends on them too.
+        self.status_button.show_status(self.vault.status, self.vault.count_refused())
         shown = self.detail.item
         target = self.pending_select or (shown.id if shown is not None else None)
         self.pending_select = None
@@ -705,9 +707,13 @@ class MainWindow(Adw.ApplicationWindow):
             self.detail.show_item(None)
 
     def _refresh_if_stale(self, target: str, shown: Item | None) -> None:
-        """Reload the detail when the selected item was edited on another device."""
+        """Reload the detail when the selected item changed elsewhere or iCloud's verdict did."""
         obj = self.vault.find(target)
-        stale = shown is not None and obj is not None and obj.item.modified != shown.modified
+        stale = (
+            shown is not None
+            and obj is not None
+            and (obj.item.modified, obj.item.sync_problem) != (shown.modified, shown.sync_problem)
+        )
         if stale and not self.detail.editing:
             self.detail.show_item(target)
 

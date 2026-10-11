@@ -839,6 +839,80 @@ async def test_a_refusal_from_a_crashed_cycle_is_announced_once(  # noqa: PLR091
     assert notifier.topics() == ["refused:A"]
 
 
+async def test_a_refused_login_carries_the_reason_as_its_sync_problem(
+    remote: MemoryRemote, local: MemoryLocal, daemon: Daemon, events: Events
+) -> None:
+    remote.reject("A", DUPLICATE_LOGIN)
+    local.put(twin())
+    local.put(make_credential("B"))
+    await daemon.get("A")  # a fresh read: clients have seen both logins before the cycle
+    events.items.clear()
+    await daemon.sync_now()
+    assert daemon.sync_problem("A") == DUPLICATE_LOGIN
+    assert daemon.sync_problem("B") == ""
+    assert daemon.sync_problem("unknown") == ""
+    # Nothing in the keyring changed: the event is about the refusal alone.
+    assert events.items == [["A"]]
+    events.items.clear()
+    await daemon.sync_now()  # still refused, same reason: not news
+    assert events.items == []
+
+
+async def test_the_sync_problem_clears_when_icloud_takes_the_login(
+    remote: MemoryRemote,
+    local: MemoryLocal,
+    clock: FakeClock,
+    daemon: Daemon,
+    events: Events,
+) -> None:
+    remote.reject("A", DUPLICATE_LOGIN)
+    local.put(twin())
+    await daemon.sync_now()
+    events.items.clear()
+    remote.accept("A")
+    await clock.advance(daemon.policy.rejected_retry.total_seconds() + 1)
+    await daemon.sync_now()
+    assert "A" in remote.items
+    assert daemon.sync_problem("A") == ""
+    assert events.changed_ids() == {"A"}
+
+
+async def test_the_sync_problem_of_a_deleted_login_is_forgotten(
+    remote: MemoryRemote, local: MemoryLocal, daemon: Daemon
+) -> None:
+    remote.reject("A", DUPLICATE_LOGIN)
+    local.put(twin())
+    await daemon.sync_now()
+    await daemon.delete("A")
+    await daemon.sync_now()
+    assert daemon.sync_problem("A") == ""
+
+
+async def test_an_outage_keeps_the_sync_problem(
+    remote: MemoryRemote, local: MemoryLocal, daemon: Daemon, events: Events
+) -> None:
+    remote.reject("A", DUPLICATE_LOGIN)
+    local.put(twin())
+    await daemon.sync_now()
+    events.items.clear()
+    remote.offline = True
+    await daemon.sync_now()
+    assert daemon.sync_problem("A") == DUPLICATE_LOGIN
+    assert events.items == []
+
+
+async def test_signing_out_clears_sync_problems(
+    remote: MemoryRemote, local: MemoryLocal, daemon: Daemon, events: Events
+) -> None:
+    remote.reject("A", DUPLICATE_LOGIN)
+    local.put(twin())
+    await daemon.sync_now()
+    events.items.clear()
+    await daemon.sign_out()
+    assert daemon.sync_problem("A") == ""
+    assert events.changed_ids() == {"A"}
+
+
 async def test_external_keyring_change_syncs_after_debounce(
     remote: MemoryRemote, local: MemoryLocal, clock: FakeClock, daemon: Daemon
 ) -> None:
