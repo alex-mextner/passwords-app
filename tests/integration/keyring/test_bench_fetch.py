@@ -1,6 +1,10 @@
 # SPDX-FileCopyrightText: 2026 Alex Mextner
 # SPDX-License-Identifier: MIT
-"""Performance budget (spec §12): fetching 2 000 keyring items takes under 2 seconds."""
+"""Performance budget (spec §12): fetching 2 000 keyring items takes under 2 seconds.
+
+The budget binds the steady-state sync cycle, i.e. repeat fetches. The cold first fetch reads
+every item's properties and gets its own, looser budget (see #64).
+"""
 
 from __future__ import annotations
 
@@ -24,7 +28,9 @@ if TYPE_CHECKING:
 pytestmark = [pytest.mark.integration, pytest.mark.benchmark]
 
 ITEMS = 2_000
-BUDGET_SECONDS = 2.0
+REPEATS = 4
+REPEAT_BUDGET_SECONDS = 2.0
+COLD_BUDGET_SECONDS = 3.0
 SESSION_COLLECTION = "/org/freedesktop/secrets/collection/session"
 
 
@@ -49,7 +55,7 @@ async def test_fetch_2000_items_within_budget(bus: MessageBus) -> None:
         )
     timings: list[float] = []
     snapshots: list[LocalSnapshot] = []
-    for _ in range(3):
+    for _ in range(1 + REPEATS):
         began = time.perf_counter()
         snapshots.append(await store.fetch())
         timings.append(time.perf_counter() - began)
@@ -57,8 +63,14 @@ async def test_fetch_2000_items_within_budget(bus: MessageBus) -> None:
         assert len(snapshot.items) == ITEMS
         assert snapshot.rejected == ()
     assert snapshots[-1].items[cred(1234).id].notes == "note 1234"
-    print(f"2000-item fetch timings (s): {[round(t, 3) for t in timings]}")  # noqa: T201
-    assert statistics.median(timings) < BUDGET_SECONDS, f"fetch timings: {timings}"
+    cold, repeat = timings[0], statistics.median(timings[1:])
+    print(  # noqa: T201
+        f"2000-item fetch: cold first {cold:.3f} s (budget {COLD_BUDGET_SECONDS} s), "
+        f"repeat median {repeat:.3f} s (budget {REPEAT_BUDGET_SECONDS} s), "
+        f"all timings {[round(t, 3) for t in timings]}"
+    )
+    assert repeat < REPEAT_BUDGET_SECONDS, f"repeat fetch median {repeat:.3f} s: {timings}"
+    assert cold < COLD_BUDGET_SECONDS, f"cold first fetch {cold:.3f} s: {timings}"
 
 
 async def test_large_fetch_stays_within_a_strict_bus_quota() -> None:
