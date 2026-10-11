@@ -49,10 +49,10 @@ class StoredItem:
     """An item as read from the collection (``created``/``modified`` are unix seconds).
 
     ``created`` may be left unread (None) when `needs_created` says the item is untouched
-    since our last write: then it is in the attributes. Each property read costs
-    gnome-keyring ~0.2 ms per item, which is what keeps a 2 000-item fetch inside its
-    budget. The label is always read: a rename within a second or two of our write leaves
-    ``Modified`` indistinguishable from the write itself.
+    since our last write: then it is in the attributes. gnome-keyring scans every item to
+    answer each property read, so every read skipped counts on a 2 000-item fetch. The
+    label is never skipped on the strength of ``pa-synced``: a rename within a second or
+    two of our write leaves ``Modified`` indistinguishable from the write itself.
     """
 
     ref: str
