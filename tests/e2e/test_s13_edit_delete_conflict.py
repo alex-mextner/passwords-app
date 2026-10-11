@@ -51,7 +51,10 @@ def test_s13_delete_on_linux_edit_on_iphone_recreates_in_keyring(stack: Stack) -
 
     local = wait_until(
         lambda: (
-            (i := stack.keyring_login(seeded.url, seeded.username)) and i.secret == EDITED and i
+            i
+            if (i := stack.keyring_login(seeded.url, seeded.username)) is not None
+            and i.secret == EDITED
+            else None
         ),
         what="the edited login recreated in the keyring",
     )

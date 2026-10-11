@@ -26,7 +26,7 @@ import json
 import sys
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, override
 
 import requests
 
@@ -52,6 +52,7 @@ class ShiftedClock(scheduler.SystemClock):
     def __init__(self, days_file: Path) -> None:
         self._days_file = days_file
 
+    @override
     def now(self) -> datetime:
         try:
             days = float(self._days_file.read_text(encoding="utf-8") or 0)
@@ -83,7 +84,7 @@ def _scripted_grandslam(decision_url: str) -> None:
 
 def configure(config: dict[str, object]) -> None:
     apple = str(config["apple_url"])
-    account.Endpoints = functools.partial(  # type: ignore[misc]
+    account.Endpoints = functools.partial(  # type: ignore[assignment,misc]
         account.Endpoints,
         gsa=f"{apple}/gsa-unused",
         login_delegates=f"{apple}/setup/login",
@@ -97,7 +98,7 @@ def configure(config: dict[str, object]) -> None:
         assert hasattr(scheduler, name), name
         setattr(scheduler, name, float(seconds))
     clock_file = Path(str(config["clock_file"]))
-    daemon_main.SystemClock = functools.partial(ShiftedClock, clock_file)  # type: ignore[misc]
+    daemon_main.SystemClock = functools.partial(ShiftedClock, clock_file)  # type: ignore[assignment,attr-defined]
 
 
 def main(argv: list[str]) -> int:

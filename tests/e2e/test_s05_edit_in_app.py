@@ -34,7 +34,11 @@ def test_s05_edit_in_app_reaches_icloud_and_keyring(stack: Stack, site: SiteServ
     assert held is not None
     assert (held.url, held.username) == (seeded.url, seeded.username)
     item = wait_until(
-        lambda: (i := stack.keyring.by_id(seeded.id)) and i.secret == NEW_SECRET and i,
+        lambda: (
+            i
+            if (i := stack.keyring.by_id(seeded.id)) is not None and i.secret == NEW_SECRET
+            else None
+        ),
         what="the edit in the keyring",
     )
     assert item.label == "Northwind Webmail — alex.doe@example.com"

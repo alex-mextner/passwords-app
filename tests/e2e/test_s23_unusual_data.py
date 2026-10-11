@@ -5,6 +5,7 @@ byte-for-byte in both directions, and a browser fills a login for an IP address 
 
 from __future__ import annotations
 
+import functools
 from typing import TYPE_CHECKING
 
 from tests.e2e.apple import login
@@ -40,7 +41,9 @@ def _from_iphone(site: SiteServer) -> list[Credential]:
 def test_s23_unusual_values_from_iphone_arrive_exactly(stack: Stack, site: SiteServer) -> None:
     creds = [stack.apple.create(c) for c in _from_iphone(site)]
     for cred in creds:
-        wait_until(lambda c=cred: stack.keyring_matches(c), what=f"{cred.url} in the keyring")
+        wait_until(
+            functools.partial(stack.keyring_matches, cred), what=f"{cred.url} in the keyring"
+        )
         got = stack.daemon.get(cred.id)
         assert (got["url"], got["username"], got["password"], got["title"], got["notes"]) == (
             cred.url,
@@ -52,7 +55,9 @@ def test_s23_unusual_values_from_iphone_arrive_exactly(stack: Stack, site: SiteS
     app = stack.app
     for cred in creds:
         wait_until(
-            lambda c=cred: app.detail_shows(c.id, password=c.password, username=c.username),
+            functools.partial(
+                app.detail_shows, cred.id, password=cred.password, username=cred.username
+            ),
             what=f"{cred.url} in the app",
         )
     ip_login = creds[3]

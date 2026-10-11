@@ -212,7 +212,7 @@ class DaemonApi:
                     body=[BUS_NAME],
                 )
             )
-            return bool(reply is not None and reply.body == [True])
+            return bool(reply.body == [True])
 
         return self._loop.run(go())
 
@@ -461,7 +461,9 @@ class Stack:
     def wait_cycle(self, *, states: tuple[str, ...] = ("idle",)) -> dict[str, Any]:
         """Wait for a finished cycle ending in one of `states`; returns the status."""
         return wait_until(
-            lambda: (s := self.daemon.status())["state"] in states and s["last_sync"] > 0 and s,
+            lambda: (
+                s if (s := self.daemon.status())["state"] in states and s["last_sync"] > 0 else None
+            ),
             what=f"a sync cycle ending {states} (daemon log: {self.daemon_log})",
         )
 
@@ -564,7 +566,7 @@ class Stack:
 
     def assert_no_duplicates(self) -> None:
         """No login appears twice on any side (the classic failure of a two-way sync)."""
-        sides = {
+        sides: dict[str, list[tuple[str | None, str | None]]] = {
             "iCloud": [(c.url, c.username) for c in self.apple.logins().values()],
             "keyring": [
                 (i.attributes.get("url"), i.attributes.get("username"))

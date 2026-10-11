@@ -145,12 +145,15 @@ class AppWindow:
         if page.section.kind is Kind.DELETED:
             self.section("all")
         wait_until(lambda: page.select_id(item_id), what=f"row {item_id} in the list")
-        return wait_until(
+        shown_item: Item = wait_until(
             lambda: (
-                (shown := self.window.detail.item) is not None and shown.id == item_id and shown
+                shown
+                if (shown := self.window.detail.item) is not None and shown.id == item_id
+                else None
             ),
             what=f"detail of {item_id}",
         )
+        return shown_item
 
     def detail_shows(self, item_id: str, **expected: object) -> bool:
         """Probe: the detail page shows `item_id` with these field values (e.g. password=…).
@@ -265,6 +268,7 @@ class AppWindow:
         )
         pad = 24
         full = GdkPixbuf.Pixbuf.new_from_file(str(raw))
+        assert full is not None, raw
         x0, y0 = max(0, x - pad), max(0, y - pad)
         w0 = min(full.get_width() - x0, w + 2 * pad)
         h0 = min(full.get_height() - y0, h + 2 * pad)
