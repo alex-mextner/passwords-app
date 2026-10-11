@@ -111,6 +111,9 @@ exclude_also = ["if TYPE_CHECKING:", "raise NotImplementedError", "\\.\\.\\.$"]
 line-length = 100
 target-version = "py313"
 src = ["src", "tests"]
+# TEMPORARY (#50): the vendored legacy iCloud client predates the gates; feat/icloud-client
+# replaces it and deletes every exclusion marked #50.
+extend-exclude = ["src/passwords_app/icloud", "tests/unit/icloud"]
 
 [tool.ruff.lint]
 select = ["ALL"]
@@ -140,6 +143,7 @@ mypy_path = ["src", "."]
 explicit_package_bases = true
 warn_unreachable = true
 enable_error_code = ["ignore-without-code", "redundant-expr", "truthy-bool", "possibly-undefined", "explicit-override"]
+exclude = ['^src/passwords_app/icloud/', '^tests/unit/icloud/']  # TEMPORARY (#50)
 
 [[tool.mypy.overrides]]
 module = ["srp.*", "zxcvbn.*", "publicsuffixlist.*", "secretstorage.*"]
@@ -147,6 +151,7 @@ ignore_missing_imports = true
 
 [tool.pyright]
 include = ["src"]
+exclude = ["src/passwords_app/icloud"]  # TEMPORARY (#50)
 # No venvPath/venv here: in that mode pyright reads only the venv's own site-packages and misses
 # Ubuntu's dist-packages (pycairo). Run it with the venv's interpreter instead (an activated
 # venv, or `--pythonpath .venv/bin/python` as scripts/check.sh does) so it sees the venv's
@@ -160,18 +165,26 @@ reportMissingTypeStubs = false
 reportMissingModuleSource = false
 
 [tool.bandit]
-exclude_dirs = ["tests"]
+exclude_dirs = ["tests", "src/passwords_app/icloud"]  # TEMPORARY (#50): src/passwords_app/icloud
 
 [tool.codespell]
-skip = "*.lock,*.svg,*.po,./extension/node_modules,./.venv"
-ignore-words-list = "acct,ser,srvr,ptcl,sdmn,agrp"
+skip = "*.lock,*.svg,*.po,./extension/node_modules,./.venv,./src/passwords_app/icloud,./tests/unit/icloud"  # TEMPORARY (#50): the two icloud paths
+ignore-words-list = "acct,ser,srvr,ptcl,sdmn,agrp,unparseable"
 
 [tool.vulture]
 paths = ["src"]
 min_confidence = 80
+exclude = ["src/passwords_app/icloud/"]  # TEMPORARY (#50)
+# TEMPORARY: parameters of the RemoteStore/LocalStore protocol stubs in sync/ports.py, unused
+# until feat/sync (#1) lands their implementations; that PR deletes this line.
+ignore_names = ["credential", "etag", "item_id"]
 
 [tool.deptry]
 known_first_party = ["passwords_app"]
 
 [tool.deptry.per_rule_ignores]
 DEP001 = ["gi"]
+# TEMPORARY: declared ahead of their first importers, feat/sync (#1: publicsuffixlist, zxcvbn)
+# and feat/keyring (#6: dbus-fast); each PR deletes its entries when it lands.
+DEP002 = ["dbus-fast", "publicsuffixlist", "zxcvbn"]
+DEP003 = ["urllib3"]  # TEMPORARY (#50): imported only by the legacy icloud client

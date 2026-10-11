@@ -199,16 +199,21 @@ add-on (owner's AMO API key); Chrome loads the unpacked build with a pinned `key
 ## 10. Internal contracts
 
 ```python
-class RemoteStore(Protocol):            # sync/ports.py
-    async def fetch(self) -> RemoteSnapshot: ...          # full current view (incremental inside)
-    async def upsert(self, c: Credential, etag: str | None) -> str: ...   # → new etag; ConflictError
+class RemoteStore(Protocol):  # sync/ports.py
+    async def fetch(self) -> RemoteSnapshot: ...  # full current view (incremental inside)
+    async def upsert(self, c: Credential, etag: str | None) -> str: ...  # → new etag; ConflictError
     async def delete(self, item_id: str, etag: str | None) -> None: ...  # ConflictError
-class LocalStore(Protocol):             # sync/ports.py
-    async def fetch(self) -> LocalSnapshot: ...           # LocalUnavailable if locked/missing
+
+
+class LocalStore(Protocol):  # sync/ports.py
+    async def fetch(self) -> LocalSnapshot: ...  # LocalUnavailable if locked/missing
     async def upsert(self, c: Credential) -> None: ...
     async def delete(self, item_id: str) -> None: ...
-def plan(base: Mapping[str, BaseEntry], remote: RemoteSnapshot, local: LocalSnapshot,
-         policy: SyncPolicy) -> SyncPlan: ...             # pure; sync/plan.py
+
+
+def plan(
+    base: Mapping[str, BaseEntry], remote: RemoteSnapshot, local: LocalSnapshot, policy: SyncPolicy
+) -> SyncPlan: ...  # pure; sync/plan.py
 ```
 
 ## 11. Scenario catalog (each has an e2e test)
