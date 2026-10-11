@@ -241,7 +241,10 @@ def test_extra_fields_are_authenticated() -> None:
         ("gen", 9),
         ("encver", 1),
         ("encver", 0),
-        ("wrappedkey", base64.b64encode(os.urandom(80)).decode()),
+        # A fixed id: pytest-xdist workers must collect identical test ids.
+        pytest.param(
+            "wrappedkey", base64.b64encode(os.urandom(80)).decode(), id="wrappedkey-random"
+        ),
     ],
 )
 def test_tampered_metadata_fails_to_decrypt(field: str, value: ckks.FieldValue) -> None:
