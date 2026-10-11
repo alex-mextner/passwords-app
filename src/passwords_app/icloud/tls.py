@@ -12,10 +12,17 @@ from __future__ import annotations
 
 from importlib import resources
 
+import requests
+
 _BUNDLE = resources.files(__package__) / "certs" / "apple-roots.pem"
 
 
 def apple_ca_bundle() -> str:
-    """Return the filesystem path of the Apple root certificates (for `requests`' `verify=`)."""
+    """Filesystem path of the Apple root certificates (for `requests`' `verify=`)."""
     # The wheel installs package data as plain files, so the traversable is a real path.
     return str(_BUNDLE)
+
+
+def new_session() -> requests.Session:
+    """Return a keep-alive HTTP session; one per client so calls reuse the TLS connection."""
+    return requests.Session()

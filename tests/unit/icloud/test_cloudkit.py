@@ -1,240 +1,451 @@
-"""Offline tests for the CloudKit CKCode transport framing/assembly (no network).
+# SPDX-FileCopyrightText: 2026 Alex Mextner
+# SPDX-License-Identifier: MIT
+# The sync token is a fictional test value.
+# ruff: noqa: S105
+# These tests poke the transport's framing helpers and fake raw response bodies.
+# pyright: reportPrivateUsage=false
+"""CloudKit framing: batches, headers, response matching, result errors (no network)."""
 
-The live POST (`CloudKitTransport.invoke`) is intentionally not exercised here - only the
-request building and response parsing, which are byte-deterministic.
+from __future__ import annotations
 
-Run: .venv/bin/python -m unittest tests.test_cloudkit
-"""
+import base64
+import gzip
+from typing import TYPE_CHECKING, Any, override
 
-import unittest
+import pytest
+import requests
 
+from passwords_app.icloud.proto import codec as pb
+from passwords_app.icloud.proto import cuttlefish as cf
+from passwords_app.icloud.transport import ckks
 from passwords_app.icloud.transport import cloudkit as ck
-from passwords_app.icloud.proto import codec as _proto, cuttlefish as cf
+
+if TYPE_CHECKING:
+    from collections.abc import Callable
+
+DEV = ck.DeviceConfig(device_uuid="UUID-DEV", serial="C02ABC")
+EXPECTED_CONTENT_TYPE = (
+    'application/x-protobuf; desc="https://gateway.icloud.com:443'
+    '/static/protobuf/CloudDB/CloudDBClient.desc"; '
+    "messageType=RequestOperation; delimited=true"
+)
+ZONE = ckks.ZoneId("Passwords", "_u")
 
 
-class DelimitTests(unittest.TestCase):
-    def test_round_trip(self):
-        msgs = [b"", b"a", b"x" * 200, bytes(range(50))]
-        stream = b"".join(ck.delimit(m) for m in msgs)
-        self.assertEqual(ck.undelimit(stream), msgs)
+class _Anisette:
+    def __init__(self, extra: dict[str, str] | None = None) -> None:
+        self.extra = extra or {}
+
+    def headers(self) -> dict[str, str]:
+        return dict(self.extra)
 
 
-class GunzipDecisionTests(unittest.TestCase):
-    """`requests` already gunzips a Content-Encoding:gzip response, so a manual pass keys on the
-    gzip MAGIC BYTES, not the header."""
-
-    def test_real_gzip_is_decompressed(self):
-        import gzip
-        original = b"\x0a\x05hello-protobuf-body"
-        self.assertEqual(ck.maybe_gunzip(gzip.compress(original)), original)
-
-    def test_already_plain_body_is_untouched(self):
-        # the shape `requests` hands us after auto-gunzip: a plain protobuf NOT starting with 1f 8b
-        for plain in (b"\x9eK\x01\x02\x03", b"\x0a\x02hi", b"", b"\x1f"):
-            self.assertEqual(ck.maybe_gunzip(plain), plain)
+def _response(content: bytes, status: int = 200) -> requests.Response:
+    resp = requests.Response()
+    resp.status_code = status
+    resp._content = content
+    return resp
 
 
-class RequestBuildTests(unittest.TestCase):
-    def setUp(self):
-        self.dev = ck.DeviceConfig(device_uuid="UUID-DEV", serial="C02ABC")
+class _Http(requests.Session):
+    """Answers each POST from `answer(body)`, recording what was sent."""
 
-    def test_header_fields(self):
-        f = _proto.decode_fields(ck.build_header(self.dev))
-        self.assertEqual(_proto.first_str(f, 2), ck.CUTTLEFISH_CONTAINER)
-        self.assertEqual(_proto.first_str(f, 3), ck.CUTTLEFISH_BUNDLE)
-        self.assertEqual(_proto.first(f, 19), ck.ENV_PRODUCTION)
-        self.assertEqual(_proto.first(f, 23), ck.DB_PRIVATE)
-        self.assertEqual(_proto.first_str(f, 33), "C02ABC")
-        # device identifier sub-message
-        ident = _proto.decode_fields(_proto.first(f, 7))
-        self.assertEqual(_proto.first_str(ident, 1), "UUID-DEV")
-        self.assertEqual(_proto.first(ident, 2), ck.IDENTIFIER_TYPE_DEVICE)
+    def __init__(self, answer: Callable[[bytes], requests.Response]) -> None:
+        super().__init__()
+        self.answer = answer
+        self.sent: list[dict[str, Any]] = []
 
-    def test_request_operation_structure(self):
-        header = ck.build_header(self.dev)
-        fir = cf.encode_function_invoke_request("Cuttlefish", "fetchChanges", b"PARAMS")
-        raw = ck.build_request_operation_generic(header, ck.OP_TYPE_FUNCTION_INVOKE, 1101,
-                                                 fir, op_uuid="OP-1")
-        f = _proto.decode_fields(raw)
-        self.assertEqual(_proto.first(f, 1), header)            # header
-        self.assertEqual(_proto.first(f, 1101), fir)            # functionInvokeRequest
-        op = _proto.decode_fields(_proto.first(f, 2))           # Operation
-        self.assertEqual(_proto.first_str(op, 1), "OP-1")
-        self.assertEqual(_proto.first(op, 2), ck.OP_TYPE_FUNCTION_INVOKE)
-        self.assertEqual(_proto.first(op, 4), 1)                # last=true
-
-    def test_full_body_is_gzipped_delimited(self):
-        # the request body _perform builds: gzip(delimit(RequestOperation{functionInvoke}))
-        import gzip
-        fir = cf.encode_function_invoke_request("Cuttlefish", "fetchChanges",
-                                                cf.encode_fetch_changes_request(None))
-        header = ck.build_header(self.dev)
-        req = ck.build_request_operation_generic(header, ck.OP_TYPE_FUNCTION_INVOKE, 1101, fir)
-        body = gzip.compress(ck.delimit(req))
-        inner = ck.undelimit(gzip.decompress(body))
-        self.assertEqual(len(inner), 1)
-        f = _proto.decode_fields(inner[0])
-        fir2 = _proto.decode_fields(_proto.first(f, 1101))
-        self.assertEqual(_proto.first_str(fir2, 1), "Cuttlefish")
-        self.assertEqual(_proto.first_str(fir2, 2), "fetchChanges")
-
-    def test_headers_carry_auth(self):
-        class _Anis:
-            def headers(self):
-                return {"X-Apple-I-MD-M": "machine"}
-
-        t = ck.CloudKitTransport("CKTOKEN", "USERID", self.dev, _Anis(),
-                                 mme_client_info="info")
-        h = t._headers(ck.CUTTLEFISH_BUNDLE, routing_hint="Cuttlefish/joinWithVoucher")
-        self.assertEqual(h["x-cloudkit-authtoken"], "CKTOKEN")
-        self.assertEqual(h["x-cloudkit-userid"], "USERID")
-        self.assertEqual(h["x-cloudkit-functionroutinghint"], "Cuttlefish/joinWithVoucher")
-        self.assertEqual(h["x-cloudkit-bundleid"], ck.CUTTLEFISH_BUNDLE)
-        self.assertEqual(h["x-cloudkit-containerid"], ck.CUTTLEFISH_CONTAINER)
-        self.assertEqual(h["X-Apple-I-MD-M"], "machine")  # anisette merged in
-        # record-fetch uses the securityd bundle + no routing hint
-        h2 = t._headers(ck.SECURITYD_BUNDLE)
-        self.assertEqual(h2["x-cloudkit-bundleid"], ck.SECURITYD_BUNDLE)
-        self.assertNotIn("x-cloudkit-functionroutinghint", h2)
+    @override
+    def post(self, url: Any, data: Any = None, **kwargs: Any) -> requests.Response:  # type: ignore[override]
+        self.sent.append({"url": url, "data": data, **kwargs})
+        return self.answer(data)
 
 
-class ContainerHeaderTests(unittest.TestCase):
-    """Pin the literal CloudKit container header wire values. These are the exact strings the
-    CloudKit client sends; the expected values are hardcoded, not echoed from the code under
-    test."""
-
-    EXPECTED_CONTENT_TYPE = ('application/x-protobuf; desc="https://gateway.icloud.com:443'
-                             '/static/protobuf/CloudDB/CloudDBClient.desc"; '
-                             'messageType=RequestOperation; delimited=true')
-
-    def test_container_headers_match_upstream(self):
-        h = ck._container_headers(bundle=ck.CUTTLEFISH_BUNDLE, container=ck.CUTTLEFISH_CONTAINER)
-        # accept is x-protobuf (NOT application/json) - the whole block is reused by ckAppInit
-        # even though that response body is JSON.
-        self.assertEqual(h["accept"], "application/x-protobuf")
-        self.assertEqual(h["accept-encoding"], "gzip")
-        self.assertEqual(h["accept-language"], "en-US,en;q=0.9")
-        self.assertEqual(h["cache-control"], "no-transform")
-        self.assertEqual(h["content-encoding"], "gzip")
-        self.assertEqual(h["content-type"], self.EXPECTED_CONTENT_TYPE)
-        self.assertEqual(h["user-agent"], "CloudKit/1970 (19H384)")
-        self.assertEqual(h["x-apple-c2-metric-triggers"], "0")
-        self.assertEqual(h["x-cloudkit-databasescope"], "Private")
-        self.assertEqual(h["x-cloudkit-duetpreclearedmode"], "None")
-        self.assertEqual(h["x-cloudkit-environment"], "Production")
-        self.assertEqual(h["x-cloudkit-bundleid"], ck.CUTTLEFISH_BUNDLE)
-        self.assertEqual(h["x-cloudkit-containerid"], ck.CUTTLEFISH_CONTAINER)
-
-    def test_operation_id_headers_present_and_hex_upper(self):
-        # x-apple-operation-{group-}id = uppercase hex of 8 random bytes: 16 uppercase hex chars.
-        h = ck._container_headers(bundle=ck.CUTTLEFISH_BUNDLE, container=ck.CUTTLEFISH_CONTAINER)
-        for key in ("x-apple-operation-group-id", "x-apple-operation-id"):
-            val = h[key]
-            self.assertEqual(len(val), 16)
-            self.assertEqual(val, val.upper())
-            int(val, 16)  # valid hex
-        self.assertNotEqual(h["x-apple-operation-group-id"], h["x-apple-operation-id"])
-
-    def test_request_uuid_is_uppercase(self):
-        h = ck._container_headers(bundle=ck.CUTTLEFISH_BUNDLE, container=ck.CUTTLEFISH_CONTAINER)
-        u = h["x-apple-request-uuid"]
-        self.assertEqual(u, u.upper())
-
-    def test_ck_app_init_headers_use_protobuf_accept_and_basic_dsid_mme(self):
-        # Capture the request ck_app_init builds without hitting the network. Auth MUST be
-        # Basic(dsid, mmeAuthToken) and accept MUST be x-protobuf.
-        import base64
-
-        class _Anis:
-            def headers(self):
-                return {"X-Apple-I-MD": "md"}
-
-        captured = {}
-
-        def fake_post(url, params=None, headers=None, data=None, **kw):
-            captured["url"], captured["params"] = url, params
-            captured["headers"], captured["data"] = headers, data
-
-            class R:
-                status_code = 200
-
-                def json(self):
-                    return {"cloudKitUserId": "_ckuser123"}
-            return R()
-
-        orig = ck.requests.post
-        ck.requests.post = fake_post
-        try:
-            uid = ck.ck_app_init(ck.CUTTLEFISH_CONTAINER, ck.CUTTLEFISH_BUNDLE,
-                                 "16300000000", "MME-AUTH-TOKEN", _Anis())
-        finally:
-            ck.requests.post = orig
-
-        self.assertEqual(uid, "_ckuser123")
-        self.assertEqual(captured["url"], ck.CK_APP_INIT_URL)
-        self.assertEqual(captured["params"], {"container": ck.CUTTLEFISH_CONTAINER})
-        self.assertEqual(captured["data"], "")  # empty POST body
-        hh = captured["headers"]
-        self.assertEqual(hh["accept"], "application/x-protobuf")  # NOT application/json
-        self.assertEqual(hh["content-type"], self.EXPECTED_CONTENT_TYPE)
-        self.assertIn("x-apple-operation-group-id", hh)
-        self.assertIn("x-apple-operation-id", hh)
-        self.assertEqual(hh["X-Apple-I-MD"], "md")  # anisette merged
-        # Basic(dsid : mmeAuthToken) - dsid is the username, mmeAuthToken the password
-        self.assertEqual(hh["Authorization"],
-                         "Basic " + base64.b64encode(b"16300000000:MME-AUTH-TOKEN").decode())
-
-    def test_ckcode_invoke_headers_carry_userid_authtoken(self):
-        # The CKCode header block adds x-cloudkit-userid (cloudKitUserId) + x-cloudkit-authtoken
-        # (cloudKitToken) on top of the container block.
-        class _Anis:
-            def headers(self):
-                return {}
-
-        dev = ck.DeviceConfig(device_uuid="d", serial="s")
-        t = ck.CloudKitTransport("CK-CLOUDKIT-TOKEN", "CKUSER", dev, _Anis())
-        h = t._headers(ck.CUTTLEFISH_BUNDLE, routing_hint="Cuttlefish/fetchViableBottles")
-        self.assertEqual(h["x-cloudkit-authtoken"], "CK-CLOUDKIT-TOKEN")
-        self.assertEqual(h["x-cloudkit-userid"], "CKUSER")
-        self.assertEqual(h["x-cloudkit-functionroutinghint"], "Cuttlefish/fetchViableBottles")
-        self.assertEqual(h["accept"], "application/x-protobuf")
-        self.assertIn("x-apple-operation-id", h)  # was missing before the header refactor
+def _ops_of(body: bytes) -> list[ck.ParsedRequest]:
+    return [ck.parse_request(m) for m in ck.undelimit(gzip.decompress(body))]
 
 
-class ResponseParseTests(unittest.TestCase):
-    def test_success_with_result(self):
-        result = _proto.Writer().uint64(1, ck.RESULT_SUCCESS).finish()
-        fir = _proto.Writer().bytes(1, b"cuttlefish-response").finish()
-        resp = _proto.Writer().message(3, result).message(1101, fir).finish()
-        out = ck.parse_response_operation(resp)
-        self.assertTrue(out.ok)
-        self.assertEqual(out.serialized_result, b"cuttlefish-response")
-
-    def test_error_surfaced(self):
-        err = _proto.Writer().string(4, ".changeTokenExpired").finish()
-        result = _proto.Writer().uint64(1, 3).message(2, err).finish()  # code=FAILURE
-        resp = _proto.Writer().message(3, result).finish()
-        out = ck.parse_response_operation(resp)
-        self.assertFalse(out.ok)
-        self.assertEqual(out.error_description, ".changeTokenExpired")
-
-    def test_response_feeds_function_invoke_parser(self):
-        # the serializedResult is itself a Cuttlefish proto (here a FetchChangesResponse)
-        peer = cf.encode_cuttlefish_peer("SHA256:p", cf.SignedBlob(b"i", b"s"),
-                                         cf.SignedBlob(b"i", b"s"), cf.SignedBlob(b"i", b"s"))
-        change = _proto.Writer().message(3, peer).finish()
-        changes = _proto.Writer().string(1, "tok").message(2, change).finish()
-        cf_resp = _proto.Writer().message(1, changes).finish()
-
-        result = _proto.Writer().uint64(1, ck.RESULT_SUCCESS).finish()
-        fir = _proto.Writer().bytes(1, cf_resp).finish()
-        resp = _proto.Writer().message(3, result).message(1101, fir).finish()
-
-        out = ck.parse_response_operation(resp)
-        parsed = cf.parse_fetch_changes_response(out.serialized_result)
-        self.assertEqual(parsed["sync_token"], "tok")
-        self.assertEqual(parsed["peers"][0]["hash"], "SHA256:p")
+def _echo_ok(body: bytes, *, reverse: bool = False, drop: int = 0) -> requests.Response:
+    ops = _ops_of(body)
+    answers = [ck.build_response_operation(op.uuid, op.op_type) for op in ops]
+    answers = answers[drop:]
+    if reverse:
+        answers.reverse()
+    return _response(gzip.compress(b"".join(ck.delimit(a) for a in answers)))
 
 
-if __name__ == "__main__":
-    unittest.main()
+def _transport(http: requests.Session, **kw: Any) -> ck.CloudKitTransport:
+    return ck.CloudKitTransport("CKTOKEN", "USERID", DEV, _Anisette(), http=http, **kw)
+
+
+# --- framing ---------------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize("msgs", [[b""], [b"a", b"x" * 200], [bytes(range(50)), b"", b"z" * 300]])
+def test_delimit_round_trip(msgs: list[bytes]) -> None:
+    assert ck.undelimit(b"".join(ck.delimit(m) for m in msgs)) == msgs
+
+
+def test_undelimit_rejects_a_short_final_message() -> None:
+    with pytest.raises(pb.ProtoError):
+        ck.undelimit(ck.delimit(b"abcdef")[:-2])
+
+
+def test_real_gzip_is_decompressed() -> None:
+    original = b"\x0a\x05hello-protobuf-body"
+    assert ck.maybe_gunzip(gzip.compress(original)) == original
+
+
+@pytest.mark.parametrize("plain", [b"\x9eK\x01\x02\x03", b"\x0a\x02hi", b"", b"\x1f"])
+def test_plain_body_is_untouched(plain: bytes) -> None:
+    assert ck.maybe_gunzip(plain) == plain
+
+
+def test_header_fields() -> None:
+    f = pb.decode_fields(ck.build_header(DEV))
+    assert pb.first_str(f, 2) == ck.CUTTLEFISH_CONTAINER
+    assert pb.first_str(f, 3) == ck.CUTTLEFISH_BUNDLE
+    assert pb.first_int(f, 19) == ck.ENV_PRODUCTION
+    assert pb.first_int(f, 23) == ck.DB_PRIVATE
+    assert pb.first_int(f, 25) == ck.ISOLATION_ZONE
+    assert pb.first_str(f, 33) == "C02ABC"
+    ident = pb.first_message(f, 7) or {}
+    assert (pb.first_str(ident, 1), pb.first_int(ident, 2)) == (
+        "UUID-DEV",
+        ck.IDENTIFIER_TYPE_DEVICE,
+    )
+
+
+def test_header_targets_the_shared_database_when_asked() -> None:
+    f = pb.decode_fields(ck.build_header(DEV, database=ck.DB_SHARED))
+    assert pb.first_int(f, 23) == ck.DB_SHARED
+
+
+def test_batch_puts_header_on_first_op_and_last_on_final_op() -> None:
+    ops = [ck.Operation(210, 210, b"a"), ck.Operation(210, 210, b"b"), ck.Operation(210, 210, b"c")]
+    parsed = [pb.decode_fields(m) for m in ck.undelimit(ck.build_batch(b"HEADER", ops))]
+    assert [pb.first_bytes(f, 1) for f in parsed] == [b"HEADER", None, None]
+    assert [pb.first_bytes(f, 210) for f in parsed] == [b"a", b"b", b"c"]
+    lasts = [pb.first_int(pb.first_message(f, 2) or {}, 4) for f in parsed]
+    assert lasts == [None, None, 1]
+
+
+def test_batch_ops_have_distinct_uppercase_uuids() -> None:
+    ops = [ck.Operation(214, 214, b"") for _ in range(5)]
+    uuids = [ck.parse_request(m).uuid for m in ck.undelimit(ck.build_batch(b"H", ops))]
+    assert uuids == [op.uuid for op in ops]
+    assert len(set(uuids)) == 5
+    assert all(u == u.upper() for u in uuids)
+
+
+def test_single_op_is_marked_last() -> None:
+    [raw] = ck.undelimit(ck.build_batch(b"H", [ck.Operation(1101, 1101, b"x", uuid="OP-1")]))
+    req = ck.parse_request(raw)
+    assert (req.uuid, req.op_type, req.payload(1101)) == ("OP-1", 1101, b"x")
+    assert pb.first_int(pb.first_message(req.fields, 2) or {}, 4) == 1
+
+
+# --- headers ---------------------------------------------------------------------------------
+
+
+def test_container_headers_match_upstream() -> None:
+    h = ck._container_headers(bundle=ck.CUTTLEFISH_BUNDLE, container=ck.CUTTLEFISH_CONTAINER)
+    assert h["accept"] == "application/x-protobuf"
+    assert h["accept-encoding"] == "gzip"
+    assert h["content-encoding"] == "gzip"
+    assert h["content-type"] == EXPECTED_CONTENT_TYPE
+    assert h["user-agent"] == "CloudKit/1970 (19H384)"
+    assert h["x-cloudkit-databasescope"] == "Private"
+    assert h["x-cloudkit-environment"] == "Production"
+    assert h["x-cloudkit-bundleid"] == ck.CUTTLEFISH_BUNDLE
+    assert h["x-cloudkit-containerid"] == ck.CUTTLEFISH_CONTAINER
+
+
+def test_operation_ids_are_16_uppercase_hex_and_differ() -> None:
+    h = ck._container_headers(bundle="b", container="c")
+    for key in ("x-apple-operation-group-id", "x-apple-operation-id"):
+        assert len(h[key]) == 16
+        assert h[key] == h[key].upper()
+        int(h[key], 16)
+    assert h["x-apple-operation-group-id"] != h["x-apple-operation-id"]
+    assert h["x-apple-request-uuid"] == h["x-apple-request-uuid"].upper()
+
+
+def test_transport_headers_carry_auth_and_anisette() -> None:
+    t = ck.CloudKitTransport("CKTOKEN", "USERID", DEV, _Anisette({"X-Apple-I-MD-M": "m"}))
+    h = t._headers(ck.CUTTLEFISH_BUNDLE, routing_hint="Cuttlefish/joinWithVoucher")
+    assert h["x-cloudkit-authtoken"] == "CKTOKEN"
+    assert h["x-cloudkit-userid"] == "USERID"
+    assert h["x-cloudkit-functionroutinghint"] == "Cuttlefish/joinWithVoucher"
+    assert h["X-Apple-I-MD-M"] == "m"
+    h2 = t._headers(ck.SECURITYD_BUNDLE)
+    assert h2["x-cloudkit-bundleid"] == ck.SECURITYD_BUNDLE
+    assert "x-cloudkit-functionroutinghint" not in h2
+
+
+def test_shared_database_scope_header() -> None:
+    t = ck.CloudKitTransport("t", "u", DEV, _Anisette())
+    assert t._headers("b", database=ck.DB_SHARED)["x-cloudkit-databasescope"] == "Shared"
+
+
+def test_ck_app_init_auth_and_shape() -> None:
+    http = _Http(lambda _: _response(b'{"cloudKitUserId": "_ckuser123"}'))
+    uid = ck.ck_app_init(
+        ck.CUTTLEFISH_CONTAINER,
+        ck.CUTTLEFISH_BUNDLE,
+        "163",
+        "MME",
+        _Anisette({"X-Apple-I-MD": "md"}),
+        http=http,
+    )
+    assert uid == "_ckuser123"
+    [sent] = http.sent
+    assert sent["url"] == ck.CK_APP_INIT_URL
+    assert sent["params"] == {"container": ck.CUTTLEFISH_CONTAINER}
+    assert sent["data"] == ""
+    assert sent["headers"]["Authorization"] == "Basic " + base64.b64encode(b"163:MME").decode()
+    assert sent["headers"]["X-Apple-I-MD"] == "md"
+
+
+# --- responses -------------------------------------------------------------------------------
+
+
+def test_success_result_exposes_serialized_function_result() -> None:
+    fir = pb.Writer().bytes(1, b"cuttlefish-response").finish()
+    out = ck.parse_response_operation(
+        ck.build_response_operation("U", 1101, field=1101, payload=fir)
+    )
+    assert out.ok
+    assert out.uuid == "U"
+    assert out.serialized_result == b"cuttlefish-response"
+
+
+def test_failure_surfaces_description_client_error_and_retry() -> None:
+    err = pb.Writer().message(1, pb.Writer().uint64(1, 15)).uint64(3, 30).string(4, "changed")
+    raw = pb.Writer().message(3, pb.Writer().uint64(1, 3).message(2, err)).finish()
+    out = ck.parse_response_operation(raw)
+    assert not out.ok
+    assert (out.error_description, out.client_error, out.retry_after) == ("changed", 15, 30)
+    assert out.conflict
+
+
+@pytest.mark.parametrize(
+    ("client_error", "conflict"),
+    [
+        (ck.CLIENT_EXISTS, True),
+        (ck.CLIENT_OP_LOCK_FAILURE, True),
+        (ck.CLIENT_STALE_RECORD_UPDATE, True),
+        (ck.CLIENT_ATOMIC_FAILURE, False),
+        (ck.CLIENT_ZONE_NOT_FOUND, False),
+        (None, False),
+    ],
+)
+def test_conflict_codes(client_error: int | None, conflict: bool) -> None:
+    raw = ck.build_response_operation("U", 210, code=3, client_error=client_error, description="x")
+    assert ck.parse_response_operation(raw).conflict is conflict
+
+
+def test_result_error_carries_the_codes() -> None:
+    raw = ck.build_response_operation("U", 210, code=3, client_error=24, description="bad field")
+    err = ck.parse_response_operation(raw).error("saving")
+    assert isinstance(err, ck.CloudKitError)
+    assert (err.code, err.client_error, err.description) == (3, 24, "bad field")
+    assert "saving failed: bad field (client error 24)" in str(err)
+
+
+def test_missing_result_on_a_named_operation_means_success() -> None:
+    raw = pb.Writer().message(2, pb.Writer().string(1, "U")).finish()
+    assert ck.parse_response_operation(raw).ok
+
+
+def test_reply_without_operation_or_result_is_no_acknowledgement() -> None:
+    with pytest.raises(pb.ProtoError, match="no operation"):
+        ck.parse_response_operation(b"")
+
+
+_NAMED = pb.Writer().message(2, pb.Writer().string(1, "U"))
+_ERR = pb.Writer().message(1, pb.Writer().uint64(1, 60))
+
+
+@pytest.mark.parametrize(
+    ("raw", "what"),
+    [
+        (pb.Writer().uint64(3, 3).finish(), "malformed result"),
+        (pb.Writer().uint64(2, 3).message(3, pb.Writer()).finish(), "malformed operation"),
+        (_NAMED.finish() + pb.Writer().uint64(3, 3).finish(), "malformed result"),
+        (
+            _NAMED.finish()
+            + pb.Writer().message(3, pb.Writer().bytes(1, b"\x03").message(2, _ERR)).finish(),
+            "malformed result code",
+        ),
+        (
+            _NAMED.finish() + pb.Writer().message(3, pb.Writer().uint64(2, 1)).finish(),
+            "malformed result error",
+        ),
+    ],
+)
+def test_a_present_but_malformed_field_is_rejected(raw: bytes, what: str) -> None:
+    with pytest.raises(pb.ProtoError, match=what):
+        ck.parse_response_operation(raw)
+
+
+def test_named_operation_with_malformed_result_fails_the_batch() -> None:
+    raw = _NAMED.finish() + pb.Writer().uint64(3, 3).finish()
+    http = _Http(lambda _: _response(ck.delimit(raw)))
+    with pytest.raises(ck.CloudKitError):
+        _transport(http).perform_batch("/p", [ck.Operation(1, 1, b"")], bundle="b")
+
+
+@pytest.mark.parametrize(
+    "op",
+    [pb.Writer().uint64(1, 7), pb.Writer().bytes(1, b"\xff")],
+    ids=["int-id", "non-utf8-id"],
+)
+def test_damaged_operation_id_fails_the_lone_answer(op: pb.Writer) -> None:
+    ok = pb.Writer().message(3, pb.Writer().uint64(1, ck.RESULT_SUCCESS))
+    raw = pb.Writer().message(2, op).finish() + ok.finish()
+    http = _Http(lambda _: _response(ck.delimit(raw)))
+    with pytest.raises(ck.CloudKitError, match="malformed"):
+        _transport(http).perform_batch("/p", [ck.Operation(1, 1, b"")], bundle="b")
+
+
+def test_two_answers_for_one_operation_fail_the_batch() -> None:
+    op = ck.Operation(210, 210, b"x")
+    failed = ck.build_response_operation(op.uuid, 210, code=3, client_error=60)
+    ok = ck.build_response_operation(op.uuid, 210)
+    http = _Http(lambda _: _response(ck.delimit(failed) + ck.delimit(ok)))
+    with pytest.raises(ck.CloudKitError, match="do not match"):
+        _transport(http).perform_batch("/p", [op], bundle="b")
+
+
+def test_unnamed_failure_beside_a_named_success_fails_the_batch() -> None:
+    op = ck.Operation(210, 210, b"x")
+    ok = ck.build_response_operation(op.uuid, 210)
+    failed = pb.Writer().message(3, pb.Writer().uint64(1, 3)).finish()
+    http = _Http(lambda _: _response(ck.delimit(ok) + ck.delimit(failed)))
+    with pytest.raises(ck.CloudKitError, match="do not match"):
+        _transport(http).perform_batch("/p", [op], bundle="b")
+
+
+def test_answer_to_an_unknown_operation_fails_the_batch() -> None:
+    op = ck.Operation(210, 210, b"x")
+    http = _Http(lambda _: _response(ck.delimit(ck.build_response_operation("other", 210))))
+    with pytest.raises(ck.CloudKitError, match="answered 1 of 1"):
+        _transport(http).perform_batch("/p", [op], bundle="b")
+
+
+def test_contradicting_result_codes_fail_the_delete() -> None:
+    op = ck.Operation(210, 210, b"x")
+    error = pb.Writer().message(1, pb.Writer().uint64(1, 60))
+    result = pb.Writer().uint64(1, ck.RESULT_SUCCESS).uint64(1, 3).message(2, error)
+    raw = pb.Writer().message(2, pb.Writer().string(1, op.uuid)).message(3, result).finish()
+    http = _Http(lambda _: _response(ck.delimit(raw)))
+    with pytest.raises(ck.CloudKitError, match="malformed"):
+        _transport(http).perform_batch("/p", [op], bundle="b")
+
+
+def test_empty_lone_answer_does_not_confirm_a_delete() -> None:
+    http = _Http(lambda _: _response(ck.delimit(b"")))
+    with pytest.raises(ck.CloudKitError):
+        _transport(http).perform_batch("/p", [ck.Operation(1, 1, b"")], bundle="b")
+
+
+def test_corrupt_deflate_body_is_a_cloudkit_error() -> None:
+    bad = bytes.fromhex("1f8b08000000000000ff07000000000000000000")
+    http = _Http(lambda _: _response(bad))
+    with pytest.raises(ck.CloudKitError, match="undecodable"):
+        _transport(http).perform_batch("/p", [ck.Operation(1, 1, b"")], bundle="b")
+
+
+def test_function_invoke_result_feeds_cuttlefish_parser() -> None:
+    peer = cf.encode_cuttlefish_peer(
+        "SHA256:p", cf.SignedBlob(b"i", b"s"), cf.SignedBlob(b"i", b"s"), cf.SignedBlob(b"i", b"s")
+    )
+    changes = pb.Writer().string(1, "tok").message(2, pb.Writer().message(3, peer))
+    fir = pb.Writer().bytes(1, pb.Writer().message(1, changes).finish()).finish()
+    out = ck.parse_response_operation(
+        ck.build_response_operation("U", 1101, field=1101, payload=fir)
+    )
+    parsed = cf.parse_fetch_changes_response(out.serialized_result)
+    assert parsed.sync_token == "tok"
+    assert [p.hash for p in parsed.peers] == ["SHA256:p"]
+
+
+# --- batches over HTTP ---------------------------------------------------------------------------
+
+
+def test_batch_results_are_matched_by_uuid_not_position() -> None:
+    http = _Http(lambda body: _echo_ok(body, reverse=True))
+    ops = [ck.Operation(210, 210, bytes([i])) for i in range(4)]
+    results = _transport(http).perform_batch("/p", ops, bundle="b")
+    assert [r.uuid for r in results] == [op.uuid for op in ops]
+
+
+def test_batch_with_an_unanswered_op_raises() -> None:
+    http = _Http(lambda body: _echo_ok(body, drop=1))
+    ops = [ck.Operation(210, 210, b"a"), ck.Operation(210, 210, b"b")]
+    with pytest.raises(ck.CloudKitError, match="1 answers that do not match its 2"):
+        _transport(http).perform_batch("/p", ops, bundle="b")
+
+
+def test_lone_answer_without_uuid_is_accepted() -> None:
+    op = pb.Writer().message(3, pb.Writer().uint64(1, 1)).finish()
+    http = _Http(lambda _: _response(gzip.compress(ck.delimit(op))))
+    [result] = _transport(http).perform_batch("/p", [ck.Operation(1, 1, b"")], bundle="b")
+    assert result.ok
+
+
+def test_batch_body_is_gzipped_and_goes_to_the_gateway() -> None:
+    http = _Http(_echo_ok)
+    _transport(http, gateway="https://gw.example/").perform_batch(
+        "/ckdatabase/x", [ck.Operation(214, 214, b"q")], bundle=ck.SECURITYD_BUNDLE
+    )
+    [sent] = http.sent
+    assert sent["url"] == "https://gw.example/ckdatabase/x"
+    [req] = _ops_of(sent["data"])
+    assert req.payload(214) == b"q"
+    assert sent["headers"]["x-cloudkit-bundleid"] == ck.SECURITYD_BUNDLE
+
+
+def test_save_records_sends_one_conditional_op_per_record() -> None:
+    http = _Http(_echo_ok)
+    recs = [
+        (ckks.CloudKitRecord("A", "item", {}, etag="e1", zone=ZONE), False),
+        (ckks.CloudKitRecord("B", "item", {}, zone=ZONE), True),
+    ]
+    results = _transport(http).save_records(recs)
+    assert all(r.ok for r in results)
+    [sent] = http.sent
+    assert sent["url"].endswith(ck.CKDATABASE_SAVE_PATH)
+    saved = [ckks.parse_save_request(op.payload(210) or b"") for op in _ops_of(sent["data"])]
+    assert saved == recs
+
+
+def test_delete_records_names_each_record_and_zone() -> None:
+    http = _Http(_echo_ok)
+    _transport(http).delete_records([("A", ZONE), ("B", ZONE)])
+    [sent] = http.sent
+    assert sent["url"].endswith(ck.CKDATABASE_DELETE_PATH)
+    names = [ckks.parse_delete_request(op.payload(214) or b"") for op in _ops_of(sent["data"])]
+    assert names == [("A", ZONE), ("B", ZONE)]
+
+
+def test_failed_single_operation_raises_with_client_error() -> None:
+    def answer(body: bytes) -> requests.Response:
+        [op] = _ops_of(body)
+        raw = ck.build_response_operation(
+            op.uuid, op.op_type, code=3, client_error=40, description="reset"
+        )
+        return _response(gzip.compress(ck.delimit(raw)))
+
+    with pytest.raises(ck.CloudKitError) as info:
+        _transport(_Http(answer)).fetch_records(b"")
+    assert info.value.client_error == ck.CLIENT_FULL_RESET_NEEDED
+
+
+@pytest.mark.parametrize(("status", "unauthorized"), [(401, True), (403, True), (500, False)])
+def test_http_status_marks_unauthorized(status: int, unauthorized: bool) -> None:
+    with pytest.raises(ck.CloudKitError) as info:
+        _transport(_Http(lambda _: _response(b"", status))).fetch_records(b"")
+    assert info.value.http_status == status
+    assert info.value.unauthorized is unauthorized
