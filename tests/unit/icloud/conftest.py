@@ -8,13 +8,52 @@ import socket
 from typing import TYPE_CHECKING
 
 import pytest
+from tests.fakes.cloudkit_server import FakeCloudKit
+from tests.fakes.icloud_session import DEVICE, make_session
 from tests.unit.icloud.tls_server import HttpsServer, Pki, Route, build_pki, serve
 
+from passwords_app.icloud.account import connect_keychain
 from passwords_app.icloud.auth import session as sess
+from passwords_app.icloud.keychain.zones import ZoneCache
 
 if TYPE_CHECKING:
     from collections.abc import Callable, Iterator
     from http.server import ThreadingHTTPServer
+    from pathlib import Path
+
+    from passwords_app.icloud.keychain.client import KeychainClient
+
+
+class NoAnisette:
+    def headers(self) -> dict[str, str]:
+        return {"X-Apple-I-MD": "md", "X-Apple-I-MD-M": "mdm"}
+
+
+@pytest.fixture
+def fake() -> Iterator[FakeCloudKit]:
+    with FakeCloudKit() as server:
+        yield server
+
+
+@pytest.fixture
+def session(fake: FakeCloudKit) -> dict[str, object]:
+    return make_session(fake)
+
+
+@pytest.fixture
+def open_keychain(session: dict[str, object], tmp_path: Path) -> Callable[[], KeychainClient]:
+    """Open a fresh client on the same session and cache file (a new process, in effect)."""
+    cache_path = tmp_path / "zones.json"
+
+    def open_() -> KeychainClient:
+        return connect_keychain(session, DEVICE, NoAnisette(), ZoneCache(cache_path))
+
+    return open_
+
+
+@pytest.fixture
+def keychain(open_keychain: Callable[[], KeychainClient]) -> KeychainClient:
+    return open_keychain()
 
 
 _LOCAL_HOSTS = frozenset({"127.0.0.1", "::1", "localhost"})
@@ -50,9 +89,7 @@ def _no_real_keyring(
         raise AssertionError(msg)
 
     monkeypatch.setattr(sess, "_default_collection", refuse)
-    monkeypatch.setenv(
-        "DBUS_SESSION_BUS_ADDRESS", "unix:path=/nonexistent/passwords-app-test-bus"
-    )
+    monkeypatch.setenv("DBUS_SESSION_BUS_ADDRESS", "unix:path=/nonexistent/passwords-app-test-bus")
     monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path_factory.mktemp("xdg-config")))
     sess.forget_cached_keys()
 
