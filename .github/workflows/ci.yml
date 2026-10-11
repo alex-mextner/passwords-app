@@ -153,7 +153,8 @@ jobs:
         with:
           # unzip: setup-bun unpacks a zip. nodejs: eslint/tsc/prettier/web-ext have node shebangs.
           apt-packages: unzip nodejs
-      - name: Install bun
+      - &install-bun
+        name: Install bun
         uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
         with:
           bun-version: 1.4.3
@@ -197,13 +198,53 @@ jobs:
         with:
           # No GPU on hosted runners: with no /dev/dri, mutter and GTK fall back to Mesa's
           # llvmpipe (libgl1-mesa-dri). python3-gi-cairo lets GTK draw functions get a cairo context.
+          # curl, gpg: the Firefox install; unzip: setup-bun.
           apt-packages: >-
             gnome-shell mutter gsettings-desktop-schemas at-spi2-core xdg-desktop-portal
             dbus-daemon gnome-keyring pipewire wireplumber gstreamer1.0-pipewire
             gstreamer1.0-plugins-base gstreamer1.0-plugins-good ffmpeg gettext
             libgl1-mesa-dri libegl-mesa0 libglx-mesa0 fonts-cantarell fonts-dejavu-core
-            adwaita-icon-theme python3-gi-cairo ${{ env.GI_PACKAGES }}
+            adwaita-icon-theme python3-gi-cairo curl gpg unzip ${{ env.GI_PACKAGES }}
+      # The scenarios save and fill passwords through the extension in real browsers.
+      - &install-firefox
+        name: Install Firefox and geckodriver
+        env:
+          # Ubuntu ships Firefox and Chromium only as snaps, which do not run in a container:
+          # Firefox comes from Mozilla's apt repository, Chromium from Playwright.
+          MOZILLA_KEY_FINGERPRINT: 35BAA0B33E9EB396F59CA838C0BA5CE6DC6315A3
+          GECKODRIVER_VERSION: 0.37.1
+          GECKODRIVER_SHA256: e815130ea95983e162ae91843b48d3a3ce991735635fce83a647afde21e09f7e
+        run: |
+          set -euo pipefail
+          key=/etc/apt/keyrings/packages.mozilla.org.asc
+          install -d -m 0755 /etc/apt/keyrings
+          curl -fsSLo "$key" https://packages.mozilla.org/apt/repo-signing-key.gpg
+          fingerprint=$(gpg --show-keys --with-colons "$key" | awk -F: '$1 == "fpr" { print $10; exit }')
+          [ "$fingerprint" = "$MOZILLA_KEY_FINGERPRINT" ]
+          printf '%s\n' 'Types: deb' 'URIs: https://packages.mozilla.org/apt' 'Suites: mozilla' \
+            'Components: main' "Signed-By: $key" >/etc/apt/sources.list.d/mozilla.sources
+          # Outrank Ubuntu's snap-installing transitional firefox package.
+          printf '%s\n' 'Package: *' 'Pin: origin packages.mozilla.org' 'Pin-Priority: 1000' \
+            >/etc/apt/preferences.d/mozilla
+          apt-get update -qq
+          apt-get install -y -qq --no-install-recommends firefox
+          tarball="geckodriver-v${GECKODRIVER_VERSION}-linux64.tar.gz"
+          curl -fsSLo "/tmp/$tarball" \
+            "https://github.com/mozilla/geckodriver/releases/download/v${GECKODRIVER_VERSION}/$tarball"
+          echo "$GECKODRIVER_SHA256  /tmp/$tarball" | sha256sum -c -
+          tar -xzf "/tmp/$tarball" -C /usr/local/bin geckodriver
+      - &install-chromium
+        name: Install Chromium
+        run: .venv/bin/playwright install --with-deps chromium
+      - *install-bun
+      - name: Build the extension
+        working-directory: extension
+        run: bun install --frozen-lockfile && bun run build
       - name: Check
+        env:
+          # The apt Firefox above, not a Selenium Manager download at test time.
+          PA_FIREFOX: /usr/bin/firefox
+          PA_GECKODRIVER: /usr/local/bin/geckodriver
         run: scripts/check.sh gui e2e
       - name: Upload proof
         if: always()
@@ -225,47 +266,17 @@ jobs:
       contents: read # checkout
     container:
       image: ubuntu:26.04@sha256:f144425ff09be612d6d9ad965196e9cdc23dae1f42110a8a11a3e9a8198759f7
-    env:
-      # Ubuntu ships Firefox and Chromium only as snaps, which do not run in a container:
-      # Firefox comes from Mozilla's apt repository, Chromium from Playwright.
-      MOZILLA_KEY_FINGERPRINT: 35BAA0B33E9EB396F59CA838C0BA5CE6DC6315A3
-      GECKODRIVER_VERSION: 0.37.1
-      GECKODRIVER_SHA256: e815130ea95983e162ae91843b48d3a3ce991735635fce83a647afde21e09f7e
     steps:
       - *install-git
       - *checkout
       - name: Setup
         uses: ./.github/actions/setup # zizmor: ignore[self-repository]
         with:
-          # unzip: setup-bun unpacks a zip; the e2e tests build the extension with bun.
+          # unzip: setup-bun unpacks a zip; the browser tests build the extension with bun.
           apt-packages: curl gpg dbus-daemon gnome-keyring ffmpeg unzip ${{ env.GI_PACKAGES }}
-      - name: Install bun
-        uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
-        with:
-          bun-version: 1.4.3
-          no-cache: true # a cache shared across PRs could be poisoned
-      - name: Install Firefox and geckodriver
-        run: |
-          set -euo pipefail
-          key=/etc/apt/keyrings/packages.mozilla.org.asc
-          install -d -m 0755 /etc/apt/keyrings
-          curl -fsSLo "$key" https://packages.mozilla.org/apt/repo-signing-key.gpg
-          fingerprint=$(gpg --show-keys --with-colons "$key" | awk -F: '$1 == "fpr" { print $10; exit }')
-          [ "$fingerprint" = "$MOZILLA_KEY_FINGERPRINT" ]
-          printf '%s\n' 'Types: deb' 'URIs: https://packages.mozilla.org/apt' 'Suites: mozilla' \
-            'Components: main' "Signed-By: $key" >/etc/apt/sources.list.d/mozilla.sources
-          # Outrank Ubuntu's snap-installing transitional firefox package.
-          printf '%s\n' 'Package: *' 'Pin: origin packages.mozilla.org' 'Pin-Priority: 1000' \
-            >/etc/apt/preferences.d/mozilla
-          apt-get update -qq
-          apt-get install -y -qq --no-install-recommends firefox
-          tarball="geckodriver-v${GECKODRIVER_VERSION}-linux64.tar.gz"
-          curl -fsSLo "/tmp/$tarball" \
-            "https://github.com/mozilla/geckodriver/releases/download/v${GECKODRIVER_VERSION}/$tarball"
-          echo "$GECKODRIVER_SHA256  /tmp/$tarball" | sha256sum -c -
-          tar -xzf "/tmp/$tarball" -C /usr/local/bin geckodriver
-      - name: Install Chromium
-        run: .venv/bin/playwright install --with-deps chromium
+      - *install-bun
+      - *install-firefox
+      - *install-chromium
       - name: Check
         run: scripts/check.sh browser
       - name: Upload proof
