@@ -700,7 +700,9 @@ def test_delete_after_another_device_added_a_sidecar_is_a_conflict(
     # sidecar; deleting would leave its notes behind with no login.
     fake.put_login(_cred())
     stored = keychain.fetch()[_cred().id]
-    fake.put_item("SIDE", passwords.updated_login(stored.login, _cred(notes="n"), T0).sidecar)
+    sidecar = passwords.updated_login(stored.login, _cred(notes="n"), T0).sidecar
+    assert sidecar is not None
+    fake.put_item("SIDE", sidecar)
     with pytest.raises(RecordConflictError):
         keychain.delete(_cred().id, stored.etag)
     assert fake.logins()[_cred().id].notes == "n"
