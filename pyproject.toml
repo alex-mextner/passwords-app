@@ -64,6 +64,12 @@ dev = [
     "yamllint>=1.37",
 ]
 
+# The app targets GNOME on Linux only. Locking for Linux alone keeps Windows-only packages
+# (pywin32) out of uv.lock, whose pins dependency-review audits as data with pip-audit on a
+# Linux runner, where those packages cannot be resolved.
+[tool.uv]
+environments = ["sys_platform == 'linux'"]
+
 [tool.hatch.build.targets.wheel]
 packages = ["src/passwords_app"]
 
