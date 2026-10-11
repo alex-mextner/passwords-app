@@ -1,12 +1,24 @@
-"""Cuttlefish and function-invoke wire messages for the sponsored-join path. Carries the
-octagon/keys peer identity onto the wire; CloudKit container framing lives in transport/cloudkit.
-See RESEARCH.md (Stages 2-4) for the field-number provenance."""
+# SPDX-FileCopyrightText: 2026 Alex Mextner
+# SPDX-License-Identifier: MIT
+"""Cuttlefish (Octagon trust service) wire messages used by the join and the view-key fetch.
+
+The peer identity built in `octagon/keys.py` goes on the wire here; the CloudKit framing that
+carries these as CKCode function invocations lives in `transport/cloudkit.py`.
+"""
 
 from __future__ import annotations
 
 import dataclasses
 
-from .codec import Writer, decode_fields, first, first_str
+from passwords_app.icloud.proto.codec import (
+    Writer,
+    all_bytes,
+    decode_fields,
+    first_bytes,
+    first_int,
+    first_message,
+    first_str,
+)
 
 
 def encode_signed_info(info: bytes, signature: bytes) -> bytes:
@@ -15,10 +27,10 @@ def encode_signed_info(info: bytes, signature: bytes) -> bytes:
 
 def parse_signed_info(raw: bytes) -> tuple[bytes, bytes]:
     f = decode_fields(raw)
-    return first(f, 1, b""), first(f, 2, b"")
+    return first_bytes(f, 1) or b"", first_bytes(f, 2) or b""
 
 
-@dataclasses.dataclass
+@dataclasses.dataclass(frozen=True, slots=True)
 class SignedBlob:
     info: bytes
     sig: bytes
@@ -27,33 +39,53 @@ class SignedBlob:
         return encode_signed_info(self.info, self.sig)
 
 
-def encode_cuttlefish_peer(peer_id: str, permanent: SignedBlob, stable: SignedBlob,
-                           dynamic: SignedBlob, voucher: SignedBlob | None = None) -> bytes:
-    w = (Writer()
-         .string(1, peer_id)
-         .message(2, permanent.encode())
-         .message(3, stable.encode())
-         .message(4, dynamic.encode()))
-    if voucher is not None:
-        w.message(5, voucher.encode())
-    return w.finish()
+@dataclasses.dataclass(frozen=True, slots=True)
+class CuttlefishPeer:
+    hash: str | None
+    permanent_info: SignedBlob | None
+    stable_info: SignedBlob | None
+    dynamic_info: SignedBlob | None
+    voucher: SignedBlob | None
 
 
-def parse_cuttlefish_peer(raw: bytes) -> dict:
+def encode_cuttlefish_peer(
+    peer_id: str,
+    permanent: SignedBlob,
+    stable: SignedBlob,
+    dynamic: SignedBlob,
+    voucher: SignedBlob | None = None,
+) -> bytes:
+    return (
+        Writer()
+        .string(1, peer_id)
+        .message(2, permanent.encode())
+        .message(3, stable.encode())
+        .message(4, dynamic.encode())
+        .message(5, voucher.encode() if voucher is not None else None)
+        .finish()
+    )
+
+
+def _signed(raw: bytes | None) -> SignedBlob | None:
+    return SignedBlob(*parse_signed_info(raw)) if raw is not None else None
+
+
+def parse_cuttlefish_peer(raw: bytes) -> CuttlefishPeer:
     f = decode_fields(raw)
-    out = {"hash": first_str(f, 1)}
-    for key, num in (("permanent_info", 2), ("stable_info", 3), ("dynamic_info", 4),
-                     ("voucher", 5)):
-        blob = first(f, num)
-        out[key] = SignedBlob(*parse_signed_info(blob)) if blob is not None else None
-    return out
+    return CuttlefishPeer(
+        hash=first_str(f, 1),
+        permanent_info=_signed(first_bytes(f, 2)),
+        stable_info=_signed(first_bytes(f, 3)),
+        dynamic_info=_signed(first_bytes(f, 4)),
+        voucher=_signed(first_bytes(f, 5)),
+    )
 
 
 def encode_voucher(reason: int, beneficiary: str, sponsor: str) -> bytes:
     return Writer().uint64(1, reason).string(2, beneficiary).string(3, sponsor).finish()
 
 
-@dataclasses.dataclass
+@dataclasses.dataclass(frozen=True, slots=True)
 class TlkShare:
     service: str = ""
     curve: int = 0
@@ -63,30 +95,46 @@ class TlkShare:
     receiver: str = ""
     receiver_public_encryption_key: str = ""  # base64 SPKI
     sender: str = ""
-    signature: str = ""            # base64
+    signature: str = ""  # base64
     version: int = 0
-    wrapped_key: str = ""          # base64
+    wrapped_key: str = ""  # base64
 
     def encode(self) -> bytes:
-        return (Writer()
-                .string(1, self.service).uint64(2, self.curve).uint64(3, self.epoch)
-                .string(4, self.key_id).uint64(5, self.poisoned).string(6, self.receiver)
-                .string(7, self.receiver_public_encryption_key).string(8, self.sender)
-                .string(9, self.signature).uint64(10, self.version)
-                .string(11, self.wrapped_key).finish())
+        return (
+            Writer()
+            .string(1, self.service)
+            .uint64(2, self.curve)
+            .uint64(3, self.epoch)
+            .string(4, self.key_id)
+            .uint64(5, self.poisoned)
+            .string(6, self.receiver)
+            .string(7, self.receiver_public_encryption_key)
+            .string(8, self.sender)
+            .string(9, self.signature)
+            .uint64(10, self.version)
+            .string(11, self.wrapped_key)
+            .finish()
+        )
 
     @classmethod
-    def parse(cls, raw: bytes) -> "TlkShare":
+    def parse(cls, raw: bytes) -> TlkShare:
         f = decode_fields(raw)
         return cls(
-            service=first_str(f, 1, ""), curve=first(f, 2, 0), epoch=first(f, 3, 0),
-            key_id=first_str(f, 4, ""), poisoned=first(f, 5, 0), receiver=first_str(f, 6, ""),
-            receiver_public_encryption_key=first_str(f, 7, ""), sender=first_str(f, 8, ""),
-            signature=first_str(f, 9, ""), version=first(f, 10, 0),
-            wrapped_key=first_str(f, 11, ""))
+            service=first_str(f, 1, ""),
+            curve=first_int(f, 2) or 0,
+            epoch=first_int(f, 3) or 0,
+            key_id=first_str(f, 4, ""),
+            poisoned=first_int(f, 5) or 0,
+            receiver=first_str(f, 6, ""),
+            receiver_public_encryption_key=first_str(f, 7, ""),
+            sender=first_str(f, 8, ""),
+            signature=first_str(f, 9, ""),
+            version=first_int(f, 10) or 0,
+            wrapped_key=first_str(f, 11, ""),
+        )
 
 
-@dataclasses.dataclass
+@dataclasses.dataclass(frozen=True, slots=True)
 class ViewKey:
     key_id: str = ""
     top_level_key_id: str = ""
@@ -95,12 +143,18 @@ class ViewKey:
     hardware: str = ""
 
     def encode(self) -> bytes:
-        return (Writer().string(1, self.key_id).string(2, self.top_level_key_id)
-                .uint64(3, self.key_number).string(4, self.key).string(5, self.hardware)
-                .finish())
+        return (
+            Writer()
+            .string(1, self.key_id)
+            .string(2, self.top_level_key_id)
+            .uint64(3, self.key_number)
+            .string(4, self.key)
+            .string(5, self.hardware)
+            .finish()
+        )
 
 
-@dataclasses.dataclass
+@dataclasses.dataclass(frozen=True, slots=True)
 class ViewKeys:
     service: str = ""
     top_level_key: ViewKey | None = None
@@ -110,73 +164,90 @@ class ViewKeys:
 
     def encode(self) -> bytes:
         w = Writer().string(1, self.service)
-        for num, vk in ((2, self.top_level_key), (3, self.class_a), (4, self.class_c),
-                        (5, self.old_top_level_key)):
+        for num, vk in (
+            (2, self.top_level_key),
+            (3, self.class_a),
+            (4, self.class_c),
+            (5, self.old_top_level_key),
+        ):
             if vk is not None:
                 w.message(num, vk.encode())
         return w.finish()
+
+
+@dataclasses.dataclass(frozen=True, slots=True)
+class FetchChanges:
+    sync_token: str | None
+    peers: tuple[CuttlefishPeer, ...]
 
 
 def encode_fetch_changes_request(sync_token: str | None) -> bytes:
     return Writer().string(1, sync_token).finish()
 
 
-def parse_fetch_changes_response(raw: bytes) -> dict:
-    f = decode_fields(raw)
-    changes_blob = first(f, 1)
-    if changes_blob is None:
-        return {"sync_token": None, "peers": []}
-    cf = decode_fields(changes_blob)
-    peers = []
-    for change in cf.get(2, []):
-        chg = decode_fields(change)
-        add = first(chg, 3)
+def parse_fetch_changes_response(raw: bytes) -> FetchChanges:
+    changes = first_message(decode_fields(raw), 1)
+    if changes is None:
+        return FetchChanges(None, ())
+    peers: list[CuttlefishPeer] = []
+    for change in all_bytes(changes, 2):
+        add = first_bytes(decode_fields(change), 3)
         if add is not None:
             peers.append(parse_cuttlefish_peer(add))
-    return {"sync_token": first_str(cf, 1), "peers": peers}
+    return FetchChanges(first_str(changes, 1), tuple(peers))
 
 
-def encode_join_with_voucher_request(peer: bytes, shares: list[TlkShare] | None = None,
-                                     keys: list[ViewKeys] | None = None,
-                                     bottle: bytes | None = None,
-                                     restore_point: str | None = None) -> bytes:
+def encode_join_with_voucher_request(
+    peer: bytes,
+    shares: list[TlkShare] | None = None,
+    keys: list[ViewKeys] | None = None,
+    bottle: bytes | None = None,
+    restore_point: str | None = None,
+) -> bytes:
     """`peer` is an encoded CuttlefishPeer with its voucher SignedInfo populated by the sponsor."""
-    w = (Writer().string(1, restore_point).message(2, peer).message(3, bottle))
-    for s in (shares or []):
+    w = Writer().string(1, restore_point).message(2, peer).message(3, bottle)
+    for s in shares or []:
         w.message(4, s.encode())
-    for k in (keys or []):
+    for k in keys or []:
         w.message(5, k.encode())
     return w.finish()
 
 
 def encode_fetch_recoverable_tlkshares_request(peer_id: str) -> bytes:
-    """Asks the server for every view TLKShare our peer can recover, incl. user-controllable
-    views (Passwords) that have no plain CKKS tlkshare addressed to us."""
+    """Ask for every view TLKShare the peer can recover (incl. Passwords, with no plain one)."""
     return Writer().string(1, peer_id).finish()
 
 
-def parse_recoverable_tlkshares_response(raw: bytes) -> dict:
-    """Returns the inner Record protobufs (parse with ckks.parse_record):
-    {"share_records": [...], "synckey_records": [...]}."""
-    f = decode_fields(raw)
+@dataclasses.dataclass(frozen=True, slots=True)
+class RecoverableShares:
+    """The inner CloudKit Record protobufs (parse them with `ckks.parse_record`)."""
 
-    def inner(cuttlefish_record):     # CuttlefishRecord{ inner(2): Record } -> Record bytes
-        return first(decode_fields(cuttlefish_record), 2) if cuttlefish_record is not None else None
+    share_records: tuple[bytes, ...]
+    synckey_records: tuple[bytes, ...]
 
-    share_records, synckey_records = [], []
-    for grp in f.get(1, []):
+
+def _inner_record(cuttlefish_record: bytes | None) -> bytes | None:
+    """CuttlefishRecord{inner(2): Record} -> the Record bytes."""
+    if cuttlefish_record is None:
+        return None
+    return first_bytes(decode_fields(cuttlefish_record), 2)
+
+
+def parse_recoverable_tlkshares_response(raw: bytes) -> RecoverableShares:
+    shares: list[bytes] = []
+    synckeys: list[bytes] = []
+    for grp in all_bytes(decode_fields(raw), 1):
         g = decode_fields(grp)
-        sh = inner(first(g, 3))
-        if sh is not None:
-            share_records.append(sh)
-        vk = first(g, 2)
-        if vk is not None:
-            vf = decode_fields(vk)
-            for fn in (1, 2, 3):      # tlk, classA, classB synckey records
-                rec = inner(first(vf, fn))
+        share = _inner_record(first_bytes(g, 3))
+        if share is not None:
+            shares.append(share)
+        view_keys = first_message(g, 2)
+        if view_keys is not None:
+            for fn in (1, 2, 3):  # tlk, classA, classC synckey records
+                rec = _inner_record(first_bytes(view_keys, fn))
                 if rec is not None:
-                    synckey_records.append(rec)
-    return {"share_records": share_records, "synckey_records": synckey_records}
+                    synckeys.append(rec)
+    return RecoverableShares(tuple(shares), tuple(synckeys))
 
 
 def encode_function_invoke_request(service: str, name: str, parameters: bytes) -> bytes:

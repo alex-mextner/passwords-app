@@ -1,51 +1,99 @@
-"""High-level authentication flow: SRP login + 2FA + PET extraction."""
+# SPDX-FileCopyrightText: 2026 Alex Mextner
+# SPDX-License-Identifier: MIT
+"""Apple ID sign-in in steps: SRP, then (when Apple asks) a second factor, then the PET.
 
-import logging
-from typing import Callable
+Split into `start` and `finish` so a UI can ask for the code between the two calls; the PET
+(password-equivalent token) in the final server provisioning data mints the iCloud tokens.
+"""
 
-from .gsa import GSAClient, GSAError
+from __future__ import annotations
 
-logger = logging.getLogger(__name__)
+import dataclasses
+from typing import TYPE_CHECKING, Literal
 
-# Called with the factor kind ("trusted" | "sms"); must return the 6-digit code.
-TwoFactorCallback = Callable[[str], str]
+from passwords_app.icloud.auth.gsa import GSAError
+from passwords_app.icloud.values import Record, child, integer, text
+
+if TYPE_CHECKING:
+    from passwords_app.icloud.auth.gsa import GSAClient
+
+FactorKind = Literal["trusted", "sms"]
+_TRUSTED = "trustedDeviceSecondaryAuth"
+_SECONDARY = "secondaryAuth"
 
 
-def authenticate(gsa: GSAClient, username: str, password: str,
-                 twofa: TwoFactorCallback) -> dict:
-    """Return the decrypted server provisioning data (spd), handling 2FA transparently."""
-    r, spd = gsa.authenticate(username, password, "sign-in")
-    status = r.get("Status", {})
-    au = status.get("au")
+@dataclasses.dataclass(frozen=True, slots=True)
+class SecondFactor:
+    """A pending second-factor challenge: where the code went and the ids to answer it."""
 
-    if au in ("trustedDeviceSecondaryAuth", "secondaryAuth"):
-        dsid = spd.get("adsid") or spd.get("DsPrsId")
-        idms = spd.get("GsIdmsToken") or spd.get("GsIdMS")
-        if not dsid or not idms:
-            raise GSAError(f"2FA required but missing dsid/GsIdMS in spd: keys={list(spd)}")
+    kind: FactorKind
+    dsid: str
+    idms_token: str
 
-        if au == "trustedDeviceSecondaryAuth":
-            gsa.trigger_trusted_factor(dsid, idms)
-            gsa.submit_trusted_factor(twofa("trusted"), dsid, idms)
-        else:
-            gsa.trigger_sms_factor(dsid, idms)
-            gsa.submit_sms_factor(twofa("sms"), dsid, idms)
 
-        # Re-authenticate: the device is now trusted, so this should NOT prompt again.
-        r, spd = gsa.authenticate(
-            username, password, "re-auth after 2FA (password already verified)")
-        if r.get("Status", {}).get("au"):
-            raise GSAError("still being asked for 2FA after submitting a code")
+@dataclasses.dataclass(frozen=True, slots=True)
+class Pet:
+    dsid: str
+    token: str
+    expiry_ms: int | None
 
+
+def account_id(spd: Record) -> str | None:
+    """Return the alternate DSID (a GUID), or the numeric DSID when Apple sends only that."""
+    adsid = text(spd, "adsid")
+    if adsid:
+        return adsid
+    numeric = spd.get("DsPrsId")
+    return str(numeric) if isinstance(numeric, (str, int)) and numeric else None
+
+
+def _factor(response: Record, spd: Record) -> SecondFactor | None:
+    au = text(child(response, "Status"), "au")
+    if au not in {_TRUSTED, _SECONDARY}:
+        return None
+    dsid = account_id(spd)
+    idms = text(spd, "GsIdmsToken") or text(spd, "GsIdMS")
+    if not dsid or not idms:
+        msg = "Apple asked for a second factor without the ids to answer it"
+        raise GSAError(msg)
+    return SecondFactor("trusted" if au == _TRUSTED else "sms", dsid, idms)
+
+
+def start(gsa: GSAClient, username: str, password: str) -> tuple[Record, SecondFactor | None]:
+    """Run SRP; return the provisioning data and the second factor Apple wants, if any.
+
+    The factor is not triggered here: an unattended refresh must not push a code to the
+    user's devices, so only an interactive caller calls `trigger`.
+    """
+    response, spd = gsa.authenticate(username, password, "sign-in")
+    return spd, _factor(response, spd)
+
+
+def trigger(gsa: GSAClient, factor: SecondFactor) -> None:
+    if factor.kind == "trusted":
+        gsa.trigger_trusted_factor(factor.dsid, factor.idms_token)
+    else:
+        gsa.trigger_sms_factor(factor.dsid, factor.idms_token)
+
+
+def finish(gsa: GSAClient, username: str, password: str, factor: SecondFactor, code: str) -> Record:
+    """Submit the code, then authenticate again: the device is trusted now, so no new prompt."""
+    if factor.kind == "trusted":
+        gsa.submit_trusted_factor(code, factor.dsid, factor.idms_token)
+    else:
+        gsa.submit_sms_factor(code, factor.dsid, factor.idms_token)
+    response, spd = gsa.authenticate(username, password, "re-auth after 2FA")
+    if text(child(response, "Status"), "au"):
+        msg = "still being asked for 2FA after submitting a code"
+        raise GSAError(msg)
     return spd
 
 
-def extract_pet(spd: dict) -> tuple[str, str, int | None]:
-    """Return (dsid, pet, expiry_ms) from spd. The PET is a password-equivalent token."""
-    dsid = spd.get("adsid") or spd.get("DsPrsId")
-    tokens = spd.get("t", {})
-    pet_entry = tokens.get("com.apple.gs.idms.pet", {})
-    pet = pet_entry.get("token")
-    if not dsid or not pet:
-        raise GSAError(f"no PET in spd (keys={list(spd)}, token keys={list(tokens)})")
-    return dsid, pet, pet_entry.get("expiry")
+def extract_pet(spd: Record) -> Pet:
+    dsid = account_id(spd)
+    entry = child(child(spd, "t"), "com.apple.gs.idms.pet")
+    token = text(entry, "token")
+    if not dsid or not token:
+        msg = "Apple's answer carries no password-equivalent token"
+        raise GSAError(msg)
+    return Pet(dsid, token, integer(entry, "expiry"))

@@ -1,56 +1,80 @@
+# SPDX-FileCopyrightText: 2026 Alex Mextner
+# SPDX-License-Identifier: MIT
+# These tests drive GSAClient's private request/header helpers and fake raw response bodies.
+# pyright: reportPrivateUsage=false
 """Offline regression tests for GrandSlam request identities and error handling."""
 
+from __future__ import annotations
+
 import plistlib
+from typing import Any, Protocol, override
 
 import pytest
 import requests
 
 from passwords_app.icloud import const
-from passwords_app.icloud.auth import gsa
 from passwords_app.icloud.auth.gsa import GSAClient, GSAError
 
 
 class _Device:
-    def meta_headers(self):
+    def meta_headers(self) -> dict[str, str]:
         return {"X-Mme-Device-Id": "device-id"}
 
 
 class _Anisette:
-    def headers(self):
+    def headers(self) -> dict[str, str]:
         return {
             "X-Apple-I-MD": "otp",
             "X-Apple-I-MD-M": "machine",
         }
 
 
-class _Response:
-    def __init__(self, content, *, status=200, content_type="text/x-xml-plist"):
-        self.content = content
-        self.status_code = status
-        self.ok = 200 <= status < 300
-        self.headers = {"Content-Type": content_type}
+def _response(
+    content: bytes, *, status: int = 200, content_type: str = "text/x-xml-plist"
+) -> requests.Response:
+    resp = requests.Response()
+    resp._content = content
+    resp.status_code = status
+    resp.headers["Content-Type"] = content_type
+    return resp
+
+
+class Answer(Protocol):
+    def __call__(self, **kwargs: Any) -> requests.Response: ...
+
+
+class _Http(requests.Session):
+    """Answers every request with `answer` and records the last call's arguments."""
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.answer: Answer = lambda **_: _plist_response()
+        self.captured: dict[str, Any] = {}
+
+    @override
+    def request(self, method: str, url: str, **kwargs: Any) -> requests.Response:  # type: ignore[override]
+        self.captured = {"method": method, "url": url, **kwargs}
+        return self.answer(**kwargs)
 
 
 @pytest.fixture
-def client():
-    return GSAClient(_Device(), _Anisette())
+def http() -> _Http:
+    return _Http()
 
 
-def _plist_response(response=None, *, status=200):
+@pytest.fixture
+def client(http: _Http) -> GSAClient:
+    return GSAClient(_Device(), _Anisette(), http=http)  # type: ignore[arg-type]
+
+
+def _plist_response(response: object = None, *, status: int = 200) -> requests.Response:
     body = {"Response": response if response is not None else {"Status": {"ec": 0}}}
-    return _Response(plistlib.dumps(body), status=status)
+    return _response(plistlib.dumps(body), status=status)
 
 
-def test_srp_request_uses_akd_identity(monkeypatch, client):
-    captured = {}
-
-    def fake_post(url, **kwargs):
-        captured.update({"url": url, **kwargs})
-        return _plist_response()
-
-    monkeypatch.setattr(gsa.requests, "post", fake_post)
-
+def test_srp_request_uses_akd_identity(http: _Http, client: GSAClient) -> None:
     client._request({"u": "nobody@example.invalid", "o": "init"})
+    captured = http.captured
 
     assert captured["url"] == const.GSA_ENDPOINT
     client_info = captured["headers"]["X-MMe-Client-Info"]
@@ -59,7 +83,7 @@ def test_srp_request_uses_akd_identity(monkeypatch, client):
     assert "com.apple.dt.Xcode" not in client_info
 
 
-def test_twofa_headers_use_akd_with_xcode_application_context(client):
+def test_twofa_headers_use_akd_with_xcode_application_context(client: GSAClient) -> None:
     headers = client._twofa_headers("123", "token")
 
     assert headers["X-Mme-Client-Info"] == const.GSA_CLIENT_INFO
@@ -70,19 +94,16 @@ def test_twofa_headers_use_akd_with_xcode_application_context(client):
     assert headers["X-Xcode-Version"] == "11.2 (11B41)"
 
 
-def test_request_returns_response_dictionary(monkeypatch, client):
+def test_request_returns_response_dictionary(http: _Http, client: GSAClient) -> None:
     expected = {"Status": {"ec": 0}, "sp": "s2k"}
-    monkeypatch.setattr(gsa.requests, "post", lambda *a, **k: _plist_response(expected))
+    http.answer = lambda **_: _plist_response(expected)
 
     assert client._request({"o": "init"}) == expected
 
 
-def test_html_503_becomes_actionable_gsa_error(monkeypatch, client):
+def test_html_503_becomes_actionable_gsa_error(http: _Http, client: GSAClient) -> None:
     html = b"<html><title>503 Service Temporarily Unavailable</title></html>"
-    monkeypatch.setattr(
-        gsa.requests, "post",
-        lambda *a, **k: _Response(html, status=503, content_type="text/html"),
-    )
+    http.answer = lambda **_: _response(html, status=503, content_type="text/html")
 
     with pytest.raises(GSAError) as exc_info:
         client._request({"o": "init"})
@@ -94,47 +115,41 @@ def test_html_503_becomes_actionable_gsa_error(monkeypatch, client):
     assert f"{len(html)} bytes" in message
 
 
-def test_non_plist_200_becomes_gsa_error(monkeypatch, client):
-    monkeypatch.setattr(
-        gsa.requests, "post",
-        lambda *a, **k: _Response(b"not a plist", content_type="text/plain"),
-    )
+def test_non_plist_200_becomes_gsa_error(http: _Http, client: GSAClient) -> None:
+    http.answer = lambda **_: _response(b"not a plist", content_type="text/plain")
 
     with pytest.raises(GSAError, match="GSA complete returned HTTP 200"):
         client._request({"o": "complete"})
 
 
-def test_transport_error_becomes_gsa_error(monkeypatch, client):
-    def timeout(*args, **kwargs):
-        raise requests.Timeout("timed out")
+def test_transport_error_becomes_gsa_error(http: _Http, client: GSAClient) -> None:
+    def timeout(**_: object) -> requests.Response:
+        msg = "timed out"
+        raise requests.Timeout(msg)
 
-    monkeypatch.setattr(gsa.requests, "post", timeout)
+    http.answer = timeout
 
     with pytest.raises(GSAError, match="GSA init request failed: timed out"):
         client._request({"o": "init"})
 
 
-def test_missing_response_dictionary_becomes_gsa_error(monkeypatch, client):
-    response = _Response(plistlib.dumps({"Status": {"ec": 0}}))
-    monkeypatch.setattr(gsa.requests, "post", lambda *a, **k: response)
+def test_missing_response_dictionary_becomes_gsa_error(http: _Http, client: GSAClient) -> None:
+    http.answer = lambda **_: _response(plistlib.dumps({"Status": {"ec": 0}}))
 
     with pytest.raises(GSAError, match="without a Response dictionary"):
         client._request({"o": "init"})
 
 
-def test_non_dictionary_plist_becomes_gsa_error(monkeypatch, client):
-    response = _Response(plistlib.dumps(["unexpected"]))
-    monkeypatch.setattr(gsa.requests, "post", lambda *a, **k: response)
+def test_non_dictionary_plist_becomes_gsa_error(http: _Http, client: GSAClient) -> None:
+    http.answer = lambda **_: _response(plistlib.dumps(["unexpected"]))
 
     with pytest.raises(GSAError, match="without a Response dictionary"):
         client._request({"o": "init"})
 
 
-def test_non_success_plist_preserves_apple_status(monkeypatch, client):
+def test_non_success_plist_preserves_apple_status(http: _Http, client: GSAClient) -> None:
     response = {"Status": {"ec": -20101, "em": "bad account"}}
-    monkeypatch.setattr(
-        gsa.requests, "post", lambda *a, **k: _plist_response(response, status=401),
-    )
+    http.answer = lambda **_: _plist_response(response, status=401)
 
     with pytest.raises(GSAError) as exc_info:
         client._request({"o": "init"})

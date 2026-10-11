@@ -1,84 +1,293 @@
-"""Offline tests for the encrypted session store's master-key handling (temp config dir).
+# SPDX-FileCopyrightText: 2026 Alex Mextner
+# SPDX-License-Identifier: MIT
+"""Encrypted session store and device identity, including files written by earlier versions."""
 
-Covers the key-file fallback path only - no Secret Service is touched.
-
-Run: .venv/bin/python -m unittest tests.test_session
-"""
+from __future__ import annotations
 
 import base64
+import json
 import os
-import tempfile
-import unittest
+import stat
+from typing import TYPE_CHECKING
+
+import nacl.secret
+import pytest
+
+from passwords_app.icloud.auth import session as sess
+from passwords_app.icloud.auth.device import Device, DeviceError
+from passwords_app.icloud.paths import ConfigPaths, default_config_dir
+
+if TYPE_CHECKING:
+    from collections.abc import Iterable, Iterator
+    from pathlib import Path
 
 
-class MasterKeyTests(unittest.TestCase):
-    def setUp(self):
-        self._tmp = tempfile.TemporaryDirectory()
-        self._old_xdg = os.environ.get("XDG_CONFIG_HOME")
-        os.environ["XDG_CONFIG_HOME"] = self._tmp.name
-        # no Secret Service: force the 0600 key file fallback
-        self._old_dbus = os.environ.pop("DBUS_SESSION_BUS_ADDRESS", None)
-
-    def tearDown(self):
-        if self._old_xdg is None:
-            os.environ.pop("XDG_CONFIG_HOME", None)
-        else:
-            os.environ["XDG_CONFIG_HOME"] = self._old_xdg
-        if self._old_dbus is not None:
-            os.environ["DBUS_SESSION_BUS_ADDRESS"] = self._old_dbus
-        self._tmp.cleanup()
-
-    @staticmethod
-    def _key_file():
-        from passwords_app.icloud import paths
-        return paths.fallback_key_file()
-
-    def test_save_then_load(self):
-        from passwords_app.icloud.auth import session
-        self.assertIsNone(session.load())  # nothing stored yet
-        session.save({"username": "alice@example.com", "token": "t"})
-        self.assertEqual(session.load()["username"], "alice@example.com")
-        f = self._key_file()
-        self.assertEqual(len(base64.b64decode(f.read_bytes())), 32)
-        self.assertEqual(f.stat().st_mode & 0o777, 0o600)
-
-    def test_raw_32_byte_key_still_accepted(self):
-        """Keys written by versions before the base64 change must keep working."""
-        from passwords_app.icloud.auth import session
-        session.save({"a": 1})
-        f = self._key_file()
-        f.write_bytes(base64.b64decode(f.read_bytes()))  # downgrade to the legacy raw form
-        self.assertEqual(session.load(), {"a": 1})
-
-    def test_unusable_key_is_replaced(self):
-        """A key the keyring mangled (wrong length) is regenerated, not fed to SecretBox."""
-        from passwords_app.icloud.auth import session
-        f = self._key_file()
-        f.parent.mkdir(parents=True, exist_ok=True)
-        f.write_bytes(b"\x00short")
-        session.save({"a": 1})  # used to raise ValueError: key must be exactly 32 bytes
-        self.assertEqual(len(base64.b64decode(f.read_bytes())), 32)
-        self.assertEqual(session.load(), {"a": 1})
-
-    def test_key_change_raises_session_error(self):
-        from passwords_app.icloud.auth import session
-        session.save({"a": 1})
-        self._key_file().write_bytes(base64.b64encode(os.urandom(32)))
-        with self.assertRaises(session.SessionError):
-            session.load()
-
-    def test_undecryptable_caches_are_discarded(self):
-        from passwords_app.icloud.auth import session
-        from passwords_app.icloud.vault import store as vault
-        from passwords_app.icloud.vault.host import Credential, CredentialStore
-
-        session.save({"a": 1})
-        vault.save_vault(CredentialStore([Credential("example.com", "alice", "pw", "Example")]))
-        self.assertEqual(len(vault.load_vault()), 1)
-
-        self._key_file().write_bytes(base64.b64encode(os.urandom(32)))
-        self.assertEqual(len(vault.load_vault()), 0)  # dropped, rebuilt by the next sync
+@pytest.fixture(autouse=True)
+def _fresh_key_cache() -> Iterator[None]:
+    sess.forget_cached_keys()
+    yield
+    sess.forget_cached_keys()
 
 
-if __name__ == "__main__":
-    unittest.main()
+class _Item:
+    def __init__(self, secret: bytes) -> None:
+        self.secret = secret
+
+    def get_secret(self) -> bytes:
+        return self.secret
+
+
+class FakeCollection:
+    """A login keyring collection, as secretstorage exposes it."""
+
+    def __init__(
+        self, *, locked: bool = False, dismiss: bool = False, broken: bool = False
+    ) -> None:
+        self.items: list[_Item] = []
+        self.locked, self.dismiss, self.broken = locked, dismiss, broken
+        self.lookups = 0
+
+    def is_locked(self) -> bool:
+        if self.broken:
+            msg = "bus gone"
+            raise RuntimeError(msg)
+        return self.locked
+
+    def unlock(self) -> bool:
+        if not self.dismiss:
+            self.locked = False
+        return self.dismiss
+
+    def search_items(self, attributes: dict[str, str]) -> Iterable[_Item]:
+        assert attributes == sess.ATTRIBUTES
+        self.lookups += 1
+        return list(self.items)
+
+    def create_item(
+        self, label: str, attributes: dict[str, str], secret: bytes, *, replace: bool
+    ) -> object:
+        assert replace
+        assert attributes == sess.ATTRIBUTES
+        assert label
+        self.items = [_Item(secret)]
+        return self.items[0]
+
+
+def _store(tmp_path: Path, coll: FakeCollection | None = None) -> sess.SessionStore:
+    return sess.SessionStore(ConfigPaths(tmp_path / "cfg"), collection=lambda: coll)
+
+
+# --- key handling ----------------------------------------------------------------------------
+
+
+def test_round_trip_with_the_key_file(tmp_path: Path) -> None:
+    store = _store(tmp_path)
+    assert store.load() is None
+    store.save({"username": "alice@example.com"})
+    assert store.load() == {"username": "alice@example.com"}
+    key_file = store.paths.fallback_key
+    assert len(base64.b64decode(key_file.read_bytes())) == 32
+    for path in (key_file, store.paths.session):
+        assert stat.S_IMODE(path.stat().st_mode) == 0o600
+    assert stat.S_IMODE(store.paths.root.stat().st_mode) == 0o700
+
+
+def test_keyring_key_is_created_once_and_reused(tmp_path: Path) -> None:
+    coll = FakeCollection()
+    store = _store(tmp_path, coll)
+    store.save({"a": 1})
+    assert len(coll.items) == 1
+    assert len(base64.b64decode(coll.items[0].secret)) == 32
+    sess.forget_cached_keys()
+    assert _store(tmp_path, coll).load() == {"a": 1}
+    assert not store.paths.fallback_key.exists()
+
+
+def test_key_is_looked_up_once_per_process(tmp_path: Path) -> None:
+    coll = FakeCollection()
+    store = _store(tmp_path, coll)
+    for _ in range(3):
+        store.save({"a": 1})
+        store.load()
+    assert coll.lookups == 1
+
+
+def test_locked_keyring_is_unlocked(tmp_path: Path) -> None:
+    coll = FakeCollection(locked=True)
+    _store(tmp_path, coll).save({"a": 1})
+    assert coll.items
+
+
+@pytest.mark.parametrize(
+    "coll", [FakeCollection(locked=True, dismiss=True), FakeCollection(broken=True), None]
+)
+def test_unusable_keyring_falls_back_to_the_key_file(
+    tmp_path: Path, coll: FakeCollection | None
+) -> None:
+    store = _store(tmp_path, coll)
+    store.save({"a": 1})
+    assert store.paths.fallback_key.exists()
+    assert store.load() == {"a": 1}
+
+
+def test_raw_32_byte_key_from_older_versions_is_accepted(tmp_path: Path) -> None:
+    store = _store(tmp_path)
+    store.save({"a": 1})
+    key_file = store.paths.fallback_key
+    key_file.write_bytes(base64.b64decode(key_file.read_bytes()))
+    sess.forget_cached_keys()
+    assert store.load() == {"a": 1}
+
+
+def test_mangled_keyring_items_are_replaced(tmp_path: Path) -> None:
+    coll = FakeCollection()
+    coll.items = [_Item(b"short")]
+    _store(tmp_path, coll).save({"a": 1})
+    [item] = coll.items
+    assert len(base64.b64decode(item.secret)) == 32
+
+
+def test_unusable_key_file_is_replaced(tmp_path: Path) -> None:
+    store = _store(tmp_path)
+    store.paths.ensure()
+    store.paths.fallback_key.write_bytes(b"\x00short")
+    store.save({"a": 1})
+    assert len(base64.b64decode(store.paths.fallback_key.read_bytes())) == 32
+
+
+def test_changed_key_makes_the_session_unreadable(tmp_path: Path) -> None:
+    store = _store(tmp_path)
+    store.save({"a": 1})
+    store.paths.fallback_key.write_bytes(base64.b64encode(os.urandom(32)))
+    sess.forget_cached_keys()
+    with pytest.raises(sess.SessionError, match="no longer matches"):
+        store.load()
+
+
+def test_session_that_is_not_an_object_is_an_error(tmp_path: Path) -> None:
+    store = _store(tmp_path)
+    key = store.master_key()
+    store.paths.session.write_bytes(nacl.secret.SecretBox(key).encrypt(b"[1, 2]"))
+    with pytest.raises(sess.SessionError, match="does not hold a session"):
+        store.load()
+
+
+def test_clear_removes_only_the_session(tmp_path: Path) -> None:
+    store = _store(tmp_path)
+    store.save({"a": 1})
+    store.clear()
+    store.clear()
+    assert store.load() is None
+    assert store.paths.fallback_key.exists()
+
+
+@pytest.mark.parametrize(
+    ("stored", "usable"),
+    [
+        (b"k" * 32, True),
+        (base64.b64encode(b"k" * 32), True),
+        (base64.b64encode(b"k" * 32).decode(), True),
+        (b"short", False),
+        (b"!!!notbase64!!!", False),
+        (None, False),
+        (base64.b64encode(b"k" * 31), False),
+    ],
+)
+def test_decode_key_forms(stored: bytes | str | None, usable: bool) -> None:
+    assert (sess.decode_key(stored) == b"k" * 32) is usable
+
+
+def test_written_files_are_never_world_readable(tmp_path: Path) -> None:
+    path = tmp_path / "secret"
+    path.write_bytes(b"old")
+    path.chmod(0o644)
+    sess.write_private(path, b"new")
+    assert path.read_bytes() == b"new"
+    assert stat.S_IMODE(path.stat().st_mode) == 0o600
+
+
+# --- files from earlier versions ---------------------------------------------------------------
+
+
+def test_legacy_session_file_still_loads(tmp_path: Path) -> None:
+    """session.enc as the vendored client wrote it: SecretBox(JSON) under a base64 key file."""
+    cfg = tmp_path / "cfg"
+    cfg.mkdir()
+    key = os.urandom(32)
+    (cfg / "master.key").write_bytes(base64.b64encode(key))
+    legacy = {
+        "username": "owner@example.com",
+        "dsid": "000-adsid",
+        "password": "pw",
+        "mme": {
+            "dsid": "123",
+            "mmeAuthToken": "t",
+            "tokens": {"cloudKitToken": "ck"},
+            "cloudKitUserId": "_u",
+        },
+        "webservices": {"keychainsync": "https://p1-escrowproxy.icloud.com"},
+        "octagon": {"peer_id": "SHA256:x", "joined": True},
+    }
+    (cfg / "session.enc").write_bytes(
+        nacl.secret.SecretBox(key).encrypt(json.dumps(legacy).encode())
+    )
+    assert sess.SessionStore(ConfigPaths(cfg), collection=lambda: None).load() == legacy
+
+
+def test_legacy_device_file_still_loads(tmp_path: Path) -> None:
+    path = tmp_path / "device.json"
+    path.write_text(
+        json.dumps({"device_id": "D-1", "serial": "C02X", "local_user_uuid": "L-1"}, indent=2)
+    )
+    assert Device.load_or_create(path) == Device("D-1", "C02X", "L-1")
+
+
+def test_new_device_is_generated_once_and_kept(tmp_path: Path) -> None:
+    path = tmp_path / "device.json"
+    first = Device.load_or_create(path)
+    assert Device.load_or_create(path) == first
+    assert first.device_id == first.device_id.upper()
+    assert first.serial.startswith("C02")
+    assert len(first.serial) == 12
+    assert stat.S_IMODE(path.stat().st_mode) == 0o600
+    assert set(json.loads(path.read_text())) == {"device_id", "serial", "local_user_uuid"}
+
+
+@pytest.mark.parametrize(
+    "content",
+    [
+        "not json",
+        "[]",
+        json.dumps({"device_id": "x"}),
+        json.dumps({"device_id": 1, "serial": "s", "local_user_uuid": "l"}),
+    ],
+)
+def test_damaged_device_file_is_an_error(tmp_path: Path, content: str) -> None:
+    path = tmp_path / "device.json"
+    path.write_text(content)
+    with pytest.raises(DeviceError):
+        Device.load_or_create(path)
+
+
+def test_device_headers_carry_identity() -> None:
+    h = Device("abc-def", "C02X", "local-uuid").meta_headers()
+    assert h["X-Mme-Device-Id"] == "ABC-DEF"
+    assert h["X-Apple-I-SRL-NO"] == "C02X"
+    assert base64.b64decode(h["X-Apple-I-MD-LU"]) == b"LOCAL-UUID"
+    assert h["X-Apple-I-Client-Time"].endswith("Z")
+
+
+# --- paths -------------------------------------------------------------------------------------
+
+
+def test_default_config_dir_follows_xdg(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path))
+    assert default_config_dir() == tmp_path / "passwords-app"
+    assert ConfigPaths.default().session == tmp_path / "passwords-app" / "session.enc"
+
+
+def test_path_lookups_do_not_touch_the_disk(tmp_path: Path) -> None:
+    paths = ConfigPaths(tmp_path / "nothing")
+    assert paths.device.name == "device.json"
+    assert paths.zone_cache.name == "icloud-zones.json"
+    assert not paths.root.exists()
