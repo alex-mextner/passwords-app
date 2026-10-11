@@ -137,22 +137,33 @@ def _port(parts: SplitResult) -> int | None:
     return port
 
 
-def _parse_site(token: str) -> tuple[str, str]:
-    """Return ``(url, username_from_url)`` for a host or URL token, or raise `_SiteError`."""
+def _split_scheme(token: str) -> tuple[str, str, bool]:
+    """Return ``(scheme, rest, explicit_scheme)``; a bare host reads as https."""
     scheme_match = _SCHEME.match(token)
-    explicit_scheme = scheme_match is not None
-    if scheme_match is not None:
-        scheme = scheme_match.group(1).lower()
-        if scheme not in _WEB_SCHEMES:
-            raise _SiteError(LabelProblem.UNSUPPORTED_SCHEME)
-        if not token[scheme_match.end() :].startswith("//"):
-            raise _SiteError(LabelProblem.MALFORMED_URL)
-        rest = token[scheme_match.end() + 2 :]
-    else:
+    if scheme_match is None:
         if "@" in token.partition("/")[0]:
             # Without a scheme, "user@host" is an e-mail address, not a site.
             raise _SiteError(LabelProblem.NO_WEBSITE)
-        scheme, rest = "https", token
+        return "https", token, False
+    scheme = scheme_match.group(1).lower()
+    if scheme not in _WEB_SCHEMES:
+        raise _SiteError(LabelProblem.UNSUPPORTED_SCHEME)
+    if not token[scheme_match.end() :].startswith("//"):
+        raise _SiteError(LabelProblem.MALFORMED_URL)
+    return scheme, token[scheme_match.end() + 2 :], True
+
+
+def _url_username(parts: SplitResult) -> str:
+    username = unquote(parts.username) if parts.username else ""
+    if _has_control(username):
+        # Percent-decoding can produce what the raw-label check could not see (%00, %0A).
+        raise _SiteError(LabelProblem.CONTROL_CHARACTERS)
+    return username
+
+
+def _parse_site(token: str) -> tuple[str, str]:
+    """Return ``(url, username_from_url)`` for a host or URL token, or raise `_SiteError`."""
+    scheme, rest, explicit_scheme = _split_scheme(token)
     try:
         parts = urlsplit(f"{scheme}://{rest}")
     except ValueError as exc:
@@ -164,11 +175,7 @@ def _parse_site(token: str) -> tuple[str, str]:
     path = "" if parts.path == "/" and not parts.query else parts.path
     query = f"?{parts.query}" if parts.query else ""
     authority = host if port is None else f"{host}:{port}"
-    username = unquote(parts.username) if parts.username else ""
-    if _has_control(username):
-        # Percent-decoding can produce what the raw-label check could not see (%00, %0A).
-        raise _SiteError(LabelProblem.CONTROL_CHARACTERS)
-    return f"{scheme}://{authority}{path}{query}", username
+    return f"{scheme}://{authority}{path}{query}", _url_username(parts)
 
 
 def _candidates(label: str) -> list[tuple[str, str, bool]]:
@@ -196,12 +203,17 @@ def parse_label(label: str) -> ParsedLabel:
         raise UnparseableLabelError(LabelProblem.CONTROL_CHARACTERS)
     if _EMAIL.match(text) and "://" not in text:
         raise UnparseableLabelError(LabelProblem.AMBIGUOUS_EMAIL)
-    specific: LabelProblem | None = None
     candidates = _candidates(text)
     if any(explicit for _, _, explicit in candidates):
         # The person named the site with a separator; reading the label another way
         # (e.g. a dotted username as the host) would only guess.
         candidates = [c for c in candidates if c[2]]
+    return _first_site(candidates)
+
+
+def _first_site(candidates: list[tuple[str, str, bool]]) -> ParsedLabel:
+    """Return the first candidate that names a site, else raise the most specific refusal."""
+    specific: LabelProblem | None = None
     for raw_site, username, explicit in candidates:
         site = raw_site.strip()
         if not _looks_like_site(site):

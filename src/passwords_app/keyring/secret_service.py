@@ -147,26 +147,12 @@ class SecretServiceStore:
         began = int(time.time())
         if began < self._known_since:
             self._known = {}  # the clock went back: Modified no longer orders edits
-        client = self._client
-        paths: list[str] = list(await client.get_property(self._collection, COLLECTION, "Items"))
-        in_flight = asyncio.Semaphore(MAX_IN_FLIGHT)
-
-        async def read(path: str, name: str) -> Any:  # noqa: ANN401 - D-Bus property value
-            async with in_flight:
-                return await client.get_property(path, ITEM, name)
-
-        known = [path for path in paths if path in self._known]
-        secrets, modified, fresh = await asyncio.gather(
-            client.get_secrets(paths),
-            asyncio.gather(*(read(path, "Modified") for path in known)),
-            _read_properties([path for path in paths if path not in self._known], read),
+        paths: list[str] = list(
+            await self._client.get_property(self._collection, COLLECTION, "Items")
         )
-        moved = [
-            path
-            for path, mtime in zip(known, modified, strict=True)
-            if int(mtime) != self._known[path].modified
-        ]
-        fresh.update(await _read_properties(moved, read))
+        secrets, fresh = await asyncio.gather(
+            self._client.get_secrets(paths), self._read_changed(paths)
+        )
         await self._check_still_unlocked(paths, secrets, fresh.values())
         properties = {path: fresh[path] if path in fresh else self._known[path] for path in paths}
         self._known = {path: p for path, p in properties.items() if p.modified < began}
@@ -182,6 +168,29 @@ class SecretServiceStore:
             )
             for path, p in properties.items()
         ]
+
+    async def _read_changed(self, paths: list[str]) -> dict[str, _Properties]:
+        """Read the properties of every item that is new or whose Modified has moved."""
+        client = self._client
+        in_flight = asyncio.Semaphore(MAX_IN_FLIGHT)
+
+        async def read(path: str, name: str) -> Any:  # noqa: ANN401 - D-Bus property value
+            async with in_flight:
+                return await client.get_property(path, ITEM, name)
+
+        known = [path for path in paths if path in self._known]
+        fresh: dict[str, _Properties]
+        modified, fresh = await asyncio.gather(
+            asyncio.gather(*(read(path, "Modified") for path in known)),
+            _read_properties([path for path in paths if path not in self._known], read),
+        )
+        moved = [
+            path
+            for path, mtime in zip(known, modified, strict=True)
+            if int(mtime) != self._known[path].modified
+        ]
+        fresh.update(await _read_properties(moved, read))
+        return fresh
 
     async def _check_still_unlocked(
         self, paths: list[str], secrets: dict[str, bytes], fresh: Iterable[_Properties]

@@ -54,6 +54,7 @@ class SessionCipher:
         iv = os.urandom(_BLOCK_BYTES)
         padder = padding.PKCS7(_BLOCK_BYTES * 8).padder()
         padded = padder.update(plaintext) + padder.finalize()
+        # nosemgrep: crypto-mode-without-authentication - Secret Service DH sessions are CBC
         encryptor = Cipher(algorithms.AES(self._key), modes.CBC(iv)).encryptor()
         return iv, encryptor.update(padded) + encryptor.finalize()
 
@@ -64,6 +65,7 @@ class SessionCipher:
         if not ciphertext or len(ciphertext) % _BLOCK_BYTES:
             msg = "ciphertext is not a whole number of AES blocks"
             raise SessionCryptoError(msg)
+        # nosemgrep: crypto-mode-without-authentication - Secret Service DH sessions are CBC
         decryptor = Cipher(algorithms.AES(self._key), modes.CBC(iv)).decryptor()
         padded = decryptor.update(ciphertext) + decryptor.finalize()
         unpadder = padding.PKCS7(_BLOCK_BYTES * 8).unpadder()

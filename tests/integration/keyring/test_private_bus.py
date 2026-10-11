@@ -5,6 +5,7 @@
 from __future__ import annotations
 
 import os
+import pwd
 from pathlib import Path
 
 import pytest
@@ -132,7 +133,8 @@ def test_bus_address_with_the_daemon_guid_is_accepted(sandbox: Path) -> None:
 
 
 def test_root_containing_the_real_home_is_refused() -> None:
-    home = Path.home()
+    # The passwd entry, as `assert_isolated` uses: $HOME may point elsewhere (CI containers).
+    home = Path(pwd.getpwuid(os.getuid()).pw_dir)
     with pytest.raises(IsolationError, match="real home"):
         assert_isolated(build_env(home.parent), home.parent)
 
