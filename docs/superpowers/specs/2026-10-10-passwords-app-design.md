@@ -231,9 +231,10 @@ class RemoteStore(Protocol):  # sync/ports.py
 
 class LocalStore(Protocol):  # sync/ports.py
     async def fetch(self) -> LocalSnapshot: ...  # LocalUnavailable if locked/missing
-    async def upsert(self, c: Credential, *, expected: str | None = None) -> None: ...  # ConflictError
-    async def delete(self, item_id: str, *, expected: str | None = None) -> None: ...  # ConflictError
-    # `expected`: the content_hash() read at fetch time; None writes unconditionally
+    # `expected`: the content_hash() read at fetch time (ConflictError if it changed since);
+    # None writes unconditionally.
+    async def upsert(self, c: Credential, *, expected: str | None = None) -> None: ...
+    async def delete(self, item_id: str, *, expected: str | None = None) -> None: ...
 
 
 def plan(
