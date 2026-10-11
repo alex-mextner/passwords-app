@@ -354,11 +354,7 @@ class ItemListPage(Adw.NavigationPage):
         self._splicing = True
         try:
             self.trash_filtered.splice(0, self.trash_filtered.get_n_items(), shown)
-            position = Gtk.INVALID_LIST_POSITION
-            if selected_id is not None:
-                position = next(
-                    (i for i, o in enumerate(shown) if o.entry.trash_id == selected_id), position
-                )
+            position = _trash_position(shown, selected_id)
             self.trash_selection.set_selected(position)
         finally:
             self._splicing = False
@@ -522,3 +518,11 @@ class ItemListPage(Adw.NavigationPage):
         model = cast("Gtk.SingleSelection", view.get_model())
         model.set_selected(position)
         self.activate_action("win.show-detail", None)
+
+
+def _trash_position(shown: list[TrashObject], trash_id: str | None) -> int:
+    """Where the entry `trash_id` is among `shown`, else `Gtk.INVALID_LIST_POSITION`."""
+    return next(
+        (i for i, o in enumerate(shown) if o.entry.trash_id == trash_id),
+        Gtk.INVALID_LIST_POSITION,
+    )
