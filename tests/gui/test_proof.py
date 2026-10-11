@@ -197,12 +197,20 @@ def _signin_scenes(app: support.AppUnderTest) -> list[tuple[str, Any]]:
 
 
 @pytest.mark.parametrize("lang", ["en", "ru"])
-def test_capture_sign_in(app: support.AppUnderTest, shell: Any, tmp_path: Path, lang: str) -> None:
+@pytest.mark.parametrize("scheme", ["light", "dark"])
+def test_capture_sign_in(
+    app: support.AppUnderTest, shell: Any, tmp_path: Path, lang: str, scheme: str
+) -> None:
+    from gi.repository import Adw  # noqa: PLC0415
+
+    Adw.StyleManager.get_default().set_color_scheme(
+        Adw.ColorScheme.FORCE_DARK if scheme == "dark" else Adw.ColorScheme.FORCE_LIGHT
+    )
     app.wait_loaded()
     out = _out(tmp_path)
     for name, scene in _signin_scenes(app):
         scene()
-        assert _capture(shell, app, out / f"{lang}-light-{name}.png").exists()
+        assert _capture(shell, app, out / f"{lang}-{scheme}-{name}.png").exists()
 
 
 def test_walkthrough_video(app: support.AppUnderTest, shell: Any, tmp_path: Path) -> None:
