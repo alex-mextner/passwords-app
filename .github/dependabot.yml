@@ -1,0 +1,37 @@
+# SPDX-FileCopyrightText: 2026 Alex Mextner
+# SPDX-License-Identifier: MIT
+#
+# Weekly dependency updates. Minor and patch bumps arrive as one grouped PR per ecosystem;
+# majors stay separate so their breaking changes get their own review. The cooldown keeps
+# brand-new releases out until they have had a few days to be yanked if compromised.
+version: 2
+updates:
+  - package-ecosystem: pip
+    directory: /
+    schedule:
+      interval: weekly
+    cooldown:
+      default-days: 7
+    groups:
+      python-minor-patch:
+        update-types: [minor, patch]
+
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+    cooldown:
+      default-days: 7
+    groups:
+      actions-minor-patch:
+        update-types: [minor, patch]
+
+  - package-ecosystem: npm
+    directory: /extension
+    schedule:
+      interval: weekly
+    cooldown:
+      default-days: 7
+    groups:
+      npm-minor-patch:
+        update-types: [minor, patch]

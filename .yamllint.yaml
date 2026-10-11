@@ -1,0 +1,12 @@
+# SPDX-FileCopyrightText: 2026 Alex Mextner
+# SPDX-License-Identifier: MIT
+extends: default
+rules:
+  line-length:
+    max: 120
+  # GitHub Actions' `on:` key is a YAML 1.1 boolean to yamllint.
+  truthy:
+    check-keys: false
+  document-start: disable
+  comments:
+    min-spaces-from-content: 1

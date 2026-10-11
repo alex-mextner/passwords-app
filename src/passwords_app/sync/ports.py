@@ -10,19 +10,21 @@ partial snapshot: the engine reads "missing" as "deleted".
 
 from __future__ import annotations
 
-from collections.abc import AsyncIterator, Mapping
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta
-from typing import Literal, Protocol
+from typing import TYPE_CHECKING, Literal, Protocol
 
-from passwords_app.core.model import Credential
+if TYPE_CHECKING:
+    from collections.abc import AsyncIterator, Mapping
+
+    from passwords_app.core.model import Credential
 
 
 class SyncError(Exception):
     """Base for every error the engine understands."""
 
 
-class RemoteUnavailable(SyncError):
+class RemoteUnavailable(SyncError):  # noqa: N818 - spec §5 contract name, used by every store
     """iCloud could not be read or written completely (network, server, protocol)."""
 
 
@@ -30,7 +32,7 @@ class AuthRequired(RemoteUnavailable):
     """Apple needs an interactive sign-in (2FA or password) before sync can continue."""
 
 
-class LocalUnavailable(SyncError):
+class LocalUnavailable(SyncError):  # noqa: N818 - spec §5 contract name, used by every store
     """The keyring collection is locked, missing, or unreachable."""
 
 

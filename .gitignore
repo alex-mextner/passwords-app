@@ -1,3 +1,4 @@
+# Python / tooling caches
 .venv/
 __pycache__/
 *.py[cod]
@@ -14,7 +15,25 @@ dist/
 coverage.xml
 htmlcov/
 *.log
+.check-logs/
+
+# Browser extension build outputs
 extension/node_modules/
 extension/dist/
 extension/web-ext-artifacts/
+
+# Proof captures: only curated files under docs/proof/ are committed
 docs/proof/raw/
+
+# Agent worktrees, and agent settings `rig apply` generates per checkout (absolute paths)
+.worktrees/
+.claude/
+.codex/
+
+# Secrets and session state must never be committed, wherever they are written
+*.enc
+device.json
+master.key
+.env
+.env.*
+tests/live/state/

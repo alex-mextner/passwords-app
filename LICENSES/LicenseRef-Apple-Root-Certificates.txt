@@ -1,0 +1,7 @@
+Apple Inc. root certificate authority certificates
+
+The certificates in this file are Apple Inc.'s public root CA certificates, downloaded
+unmodified from https://www.apple.com/certificateauthority/ . They are redistributed only so
+that this software can verify TLS connections to Apple's servers. They are not covered by
+this project's MIT license, and this project grants no rights in them; all rights remain with
+Apple Inc.

@@ -1,0 +1,56 @@
+# SPDX-FileCopyrightText: 2026 Alex Mextner
+# SPDX-License-Identifier: MIT
+#
+# OpenSSF Scorecard supply-chain checks (spec §12). Results go to the code-scanning dashboard
+# and, via publish_results, to the public Scorecard API and README badge.
+name: Scorecard
+
+on:
+  push:
+    branches: [main]
+  schedule:
+    - cron: "27 4 * * 1"
+  branch_protection_rule:
+  workflow_dispatch:
+
+# Nothing by default; the job below lists what Scorecard needs.
+permissions: {}
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  analysis:
+    name: Scorecard analysis
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: read # checkout
+      actions: read # read workflow runs for the CI-Tests check
+      security-events: write # upload SARIF to code scanning
+      id-token: write # OIDC token that authenticates publish_results
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Run Scorecard
+        uses: ossf/scorecard-action@2d1146689b8cda280b9bc96326124645441f03bc # v2.4.4
+        with:
+          results_file: results.sarif
+          results_format: sarif
+          publish_results: true
+
+      - name: Upload SARIF artifact
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: scorecard-sarif
+          path: results.sarif
+          retention-days: 5
+
+      - name: Upload SARIF to code scanning
+        uses: github/codeql-action/upload-sarif@24c54180a607b1449ed407dd24f251e4e9147c8d # v4.38.3
+        with:
+          sarif_file: results.sarif

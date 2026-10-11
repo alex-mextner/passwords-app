@@ -12,8 +12,10 @@ from __future__ import annotations
 import hashlib
 import json
 from dataclasses import dataclass
-from datetime import datetime, timedelta
-from typing import Literal
+from typing import TYPE_CHECKING, Literal
+
+if TYPE_CHECKING:
+    from datetime import datetime, timedelta
 
 
 def _require_aware(name: str, value: datetime) -> None:
