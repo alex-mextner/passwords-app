@@ -13,7 +13,14 @@ from datetime import UTC, datetime
 import pytest
 
 from passwords_app.core.model import Credential
-from passwords_app.core.urls import MatchKind, link_host, match, normalize_url, registrable_domain
+from passwords_app.core.urls import (
+    MatchKind,
+    link_host,
+    login_identity,
+    match,
+    normalize_url,
+    registrable_domain,
+)
 
 E = MatchKind.EXACT_HOST
 S = MatchKind.SAME_SITE
@@ -520,3 +527,39 @@ LINK_HOST_CASES: list[tuple[str, str]] = [
 @pytest.mark.parametrize(("raw", "expected"), LINK_HOST_CASES)
 def test_link_host(raw: str, expected: str) -> None:
     assert link_host(raw) == expected
+
+
+def _login(url: str, username: str = "alice") -> Credential:
+    return Credential("c1", url, username, "p", _T, _T)
+
+
+@pytest.mark.parametrize(
+    ("a", "b"),
+    [
+        (_login("https://example.com/login"), _login("https://EXAMPLE.com/login")),
+        (_login("https://example.com"), _login("https://example.com", "ALICE")),
+        (_login("https://example.com/x?y=1"), _login("https://example.com/x?y=1", "Alice")),
+    ],
+)
+def test_login_identity_ignores_case_of_host_and_username(a: Credential, b: Credential) -> None:
+    assert login_identity(a) == login_identity(b) is not None
+
+
+@pytest.mark.parametrize(
+    "other",
+    [
+        _login("https://example.com/login", "bob"),
+        _login("http://example.com/login"),
+        _login("https://example.com:8443/login"),
+        _login("https://example.com/other"),
+        _login("https://example.com/login?next=1"),
+        _login("https://www.example.com/login"),
+    ],
+)
+def test_login_identity_tells_different_logins_apart(other: Credential) -> None:
+    assert login_identity(_login("https://example.com/login")) != login_identity(other)
+
+
+@pytest.mark.parametrize("url", ["example.com", "mailto:a@example.com", "https://h:99999/"])
+def test_login_identity_is_none_for_what_the_keychain_cannot_store(url: str) -> None:
+    assert login_identity(_login(url)) is None

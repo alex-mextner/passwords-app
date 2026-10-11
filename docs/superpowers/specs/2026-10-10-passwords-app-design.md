@@ -110,10 +110,19 @@ Guards (never bypassed silently):
   *Apply deletions* or *Restore them*.
 - Writes to iCloud are **conditional on the record etag** captured at fetch time; a conflict
   error aborts that action and the next cycle re-plans with fresh data.
+- A login iCloud refuses to store (another login has its site and username, or the address
+  is not a website) only sets **that item** aside: the rest of the cycle continues, status is
+  not `offline`, the status message names the login, a notification fires once per refused
+  version, and the item is retried with its own backoff (2 min doubling to 6 h; at once
+  after an edit).
 
 Trash: every item removed from either side, and every conflict loser, is stored encrypted in
 state.db with `deleted_at`, `reason`, and origin for **90 days** (setting, default 90), then
-purged. *Restore* re-inserts it locally; the next cycle pushes it to iCloud.
+purged. *Restore* re-inserts it locally; the next cycle pushes it to iCloud. iCloud keeps one
+login per site and username, so when a live keyring login has the restored version's site and
+username (e.g. restoring a conflict loser), the restored version **replaces** that login in
+place and the displaced version goes to trash (reason `conflict`); Restore returns the live
+login's id.
 
 Scheduling: a cycle runs at start, every 60 s while the app or a browser is active and every
 5 min otherwise, 2 s after any local change (Secret Service `ItemCreated/Changed/Deleted`
