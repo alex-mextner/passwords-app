@@ -13,7 +13,7 @@ from typing import TYPE_CHECKING
 import pytest
 from tests.e2e.apple import login
 from tests.e2e.proof import capture_app
-from tests.e2e.stack import SurfaceTimeoutError, stays, wait_until
+from tests.e2e.stack import stays, wait_until
 
 if TYPE_CHECKING:
     from tests.e2e.stack import Stack
@@ -75,11 +75,6 @@ def test_s16_mass_delete_on_iphone_pauses_then_apply_deletes_into_trash(
     capture_app(app, f"{SCENARIO}-applied")
 
 
-@pytest.mark.xfail(
-    strict=True,
-    raises=SurfaceTimeoutError,
-    reason="#76: the list stays on the loading spinner when no change follows the first load",
-)
 @pytest.mark.stack(daemon=False)
 def test_s16_the_list_shows_the_passwords_while_paused(
     stack: Stack, bulk: list[Credential]
