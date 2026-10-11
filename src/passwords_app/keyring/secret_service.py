@@ -18,6 +18,7 @@ import os
 import sys
 import time
 import uuid
+from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Self
 
@@ -48,7 +49,7 @@ from passwords_app.keyring.mapping import (
 from passwords_app.sync.ports import LocalSnapshot, LocalUnavailable, RejectedLocalItem
 
 if TYPE_CHECKING:
-    from collections.abc import AsyncIterator
+    from collections.abc import AsyncIterator, Awaitable, Callable, Iterable
 
     from dbus_fast.aio import MessageBus
 
@@ -65,6 +66,18 @@ FILE_POLL_SECONDS = 2.0
 MAX_IN_FLIGHT = 64
 _ADOPTION_NAMESPACE = uuid.UUID("6f1d2c4e-8b3a-5e7f-9a01-3c5d7e9f1b24")
 
+type _ReadProperty = Callable[[str, str], Awaitable[Any]]
+
+
+@dataclass(frozen=True, slots=True)
+class _Properties:
+    """An item's properties as one fetch read them (unix seconds, see `StoredItem`)."""
+
+    label: str
+    attributes: dict[str, str]
+    created: int | None
+    modified: int
+
 
 def _adoption_id(item: StoredItem) -> str:
     # Derived, not random: two fetches racing to adopt the same item (e.g. daemon and app)
@@ -73,7 +86,7 @@ def _adoption_id(item: StoredItem) -> str:
 
 
 class SecretServiceStore:
-    __slots__ = ("_client", "_collection", "_io", "_label")
+    __slots__ = ("_client", "_collection", "_io", "_known", "_known_since", "_label")
 
     def __init__(self, client: SecretServiceClient, collection: str, label: str) -> None:
         self._client = client
@@ -84,6 +97,10 @@ class SecretServiceStore:
         # in other processes (Seahorse) cannot be excluded: their torn edit converges on
         # the next fetch, which `changes()` triggers.
         self._io = asyncio.Lock()
+        # Properties earlier fetches read, by item path, reused while the item's Modified
+        # stands still (see `_read_all`); `_known_since` is when the last fetch began.
+        self._known: dict[str, _Properties] = {}
+        self._known_since = 0
 
     @classmethod
     async def open(cls, bus: MessageBus, *, label: str = DEFAULT_LABEL) -> Self:
@@ -119,6 +136,17 @@ class SecretServiceStore:
             raise LocalUnavailable(str(exc)) from exc
 
     async def _read_all(self) -> list[StoredItem]:
+        # gnome-keyring finds an item by scanning all of them, so every property read costs
+        # O(items) and a full read of 2 000 items takes seconds. Every change to an item
+        # (label, attributes, secret) sets its Modified to the current second, so an item
+        # whose Modified has not moved since an earlier fetch still has the label,
+        # attributes and creation time that fetch read. Modified has one-second
+        # resolution: an edit in the very second a fetch began could leave it unchanged,
+        # so only properties with Modified before that second are kept for reuse — any
+        # later edit then moves Modified past them. Secrets are always read afresh.
+        began = int(time.time())
+        if began < self._known_since:
+            self._known = {}  # the clock went back: Modified no longer orders edits
         client = self._client
         paths: list[str] = list(await client.get_property(self._collection, COLLECTION, "Items"))
         in_flight = asyncio.Semaphore(MAX_IN_FLIGHT)
@@ -127,34 +155,36 @@ class SecretServiceStore:
             async with in_flight:
                 return await client.get_property(path, ITEM, name)
 
-        secrets, attributes, modified, labels = await asyncio.gather(
+        known = [path for path in paths if path in self._known]
+        secrets, modified, fresh = await asyncio.gather(
             client.get_secrets(paths),
-            asyncio.gather(*(read(path, "Attributes") for path in paths)),
-            asyncio.gather(*(read(path, "Modified") for path in paths)),
-            asyncio.gather(*(read(path, "Label") for path in paths)),
+            asyncio.gather(*(read(path, "Modified") for path in known)),
+            _read_properties([path for path in paths if path not in self._known], read),
         )
-        detailed = [
+        moved = [
             path
-            for path, attrs, mtime in zip(paths, attributes, modified, strict=True)
-            if needs_created(attrs, int(mtime))
+            for path, mtime in zip(known, modified, strict=True)
+            if int(mtime) != self._known[path].modified
         ]
-        created = await asyncio.gather(*(read(path, "Created") for path in detailed))
-        await self._check_still_unlocked(paths, secrets, attributes)
-        created_at = {path: int(when) for path, when in zip(detailed, created, strict=True)}
+        fresh.update(await _read_properties(moved, read))
+        await self._check_still_unlocked(paths, secrets, fresh.values())
+        properties = {path: fresh[path] if path in fresh else self._known[path] for path in paths}
+        self._known = {path: p for path, p in properties.items() if p.modified < began}
+        self._known_since = began
         return [
             StoredItem(
                 ref=path,
-                label=str(label),
-                attributes=dict(attrs),
+                label=p.label,
+                attributes=p.attributes,
                 secret=secrets[path],
-                created=created_at.get(path),
-                modified=int(mtime),
+                created=p.created,
+                modified=p.modified,
             )
-            for path, attrs, mtime, label in zip(paths, attributes, modified, labels, strict=True)
+            for path, p in properties.items()
         ]
 
     async def _check_still_unlocked(
-        self, paths: list[str], secrets: dict[str, bytes], attributes: list[dict[str, str]]
+        self, paths: list[str], secrets: dict[str, bytes], fresh: Iterable[_Properties]
     ) -> None:
         missing = len(paths) - len(secrets)
         if missing:
@@ -162,7 +192,7 @@ class SecretServiceStore:
             raise LocalUnavailable(msg)
         # A locked item shows an empty label and only hashed attributes; read as-is it
         # would look like a different, unparsable item and its credential would vanish.
-        hashed = any(name.startswith(_HASHED_ATTRIBUTE) for attrs in attributes for name in attrs)
+        hashed = any(name.startswith(_HASHED_ATTRIBUTE) for p in fresh for name in p.attributes)
         if hashed or await self._client.is_locked(self._collection):
             msg = "the collection was locked while it was being read"
             raise LocalUnavailable(msg)
@@ -304,6 +334,30 @@ async def _watch_file(path: Path, queue: asyncio.Queue[None]) -> None:
         if current != last:
             last = current
             queue.put_nowait(None)
+
+
+async def _read_properties(paths: list[str], read: _ReadProperty) -> dict[str, _Properties]:
+    attributes, modified, labels = await asyncio.gather(
+        asyncio.gather(*(read(path, "Attributes") for path in paths)),
+        asyncio.gather(*(read(path, "Modified") for path in paths)),
+        asyncio.gather(*(read(path, "Label") for path in paths)),
+    )
+    detailed = [
+        path
+        for path, attrs, mtime in zip(paths, attributes, modified, strict=True)
+        if needs_created(attrs, int(mtime))
+    ]
+    created = await asyncio.gather(*(read(path, "Created") for path in detailed))
+    created_at = {path: int(when) for path, when in zip(detailed, created, strict=True)}
+    return {
+        path: _Properties(
+            label=str(label),
+            attributes=dict(attrs),
+            created=created_at.get(path),
+            modified=int(mtime),
+        )
+        for path, attrs, mtime, label in zip(paths, attributes, modified, labels, strict=True)
+    }
 
 
 def _creation_order(ref: str) -> tuple[int, str]:
