@@ -14,13 +14,14 @@ from __future__ import annotations
 
 import asyncio
 import functools
+import json
 import os
 import sys
 import time
 import uuid
 from dataclasses import dataclass
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, Self
+from typing import TYPE_CHECKING, Any, Protocol, Self, cast
 
 from dbus_fast import Message, MessageType
 
@@ -46,6 +47,7 @@ from passwords_app.keyring.mapping import (
     needs_created,
     read_item,
 )
+from passwords_app.store.state import StateCorruptedError
 from passwords_app.sync.ports import (
     ConflictError,
     LocalSnapshot,
@@ -70,6 +72,9 @@ FILE_POLL_SECONDS = 2.0
 # connection (dbus-daemon's built-in default is 128), so keep well under that.
 MAX_IN_FLIGHT = 64
 _ADOPTION_NAMESPACE = uuid.UUID("6f1d2c4e-8b3a-5e7f-9a01-3c5d7e9f1b24")
+# Where the properties a fetch read are kept across restarts (see `SealedKeyValue`).
+SAVED_PROPERTIES_KEY = "keyring-properties"
+_SAVED_VERSION = 1
 
 type _ReadProperty = Callable[[str, str], Awaitable[Any]]
 
@@ -84,6 +89,18 @@ class _Properties:
     modified: int
 
 
+class SealedKeyValue(Protocol):
+    """Encrypted key-value storage, i.e. state.db's `kv` table (`StateStore.get`/`set`).
+
+    The saved properties are not secret, but attributes carry usernames and URLs, so they
+    must only ever be stored sealed.
+    """
+
+    def get(self, key: str) -> str | None: ...
+
+    def set(self, key: str, value: str) -> None: ...
+
+
 def _adoption_id(item: StoredItem) -> str:
     # Derived, not random: two fetches racing to adopt the same item (e.g. daemon and app)
     # must agree on its id, or one snapshot's id is overwritten by the other's write-back.
@@ -91,9 +108,16 @@ def _adoption_id(item: StoredItem) -> str:
 
 
 class SecretServiceStore:
-    __slots__ = ("_client", "_collection", "_io", "_known", "_known_since", "_label")
+    __slots__ = ("_client", "_collection", "_io", "_known", "_known_since", "_label", "_saved")
 
-    def __init__(self, client: SecretServiceClient, collection: str, label: str) -> None:
+    def __init__(
+        self,
+        client: SecretServiceClient,
+        collection: str,
+        label: str,
+        *,
+        saved: SealedKeyValue | None = None,
+    ) -> None:
         self._client = client
         self._collection = collection
         self._label = label
@@ -104,19 +128,26 @@ class SecretServiceStore:
         self._io = asyncio.Lock()
         # Properties earlier fetches read, by item path, reused while the item's Modified
         # stands still (see `_read_all`); `_known_since` is when the last fetch began.
-        self._known: dict[str, _Properties] = {}
-        self._known_since = 0
+        # With `saved`, they outlive the process: a restarted daemon's first fetch is then
+        # as cheap as a repeat fetch, and only a never-seen collection is read in full.
+        self._saved = saved
+        self._known, self._known_since = _load_saved(saved)
 
     @classmethod
-    async def open(cls, bus: MessageBus, *, label: str = DEFAULT_LABEL) -> Self:
-        """Find or create the collection and unlock it, all without prompting."""
+    async def open(
+        cls, bus: MessageBus, *, label: str = DEFAULT_LABEL, saved: SealedKeyValue | None = None
+    ) -> Self:
+        """Find or create the collection and unlock it, all without prompting.
+
+        `saved` keeps what fetches read across restarts (see `SealedKeyValue`).
+        """
         try:
             client = await SecretServiceClient.open(bus)
             collection = await ensure_collection(client, label)
             await ensure_unlocked(client, collection, label)
         except (SecretServiceError, CollectionUnavailableError) as exc:
             raise LocalUnavailable(str(exc)) from exc
-        return cls(client, collection, label)
+        return cls(client, collection, label, saved=saved)
 
     @property
     def collection(self) -> str:
@@ -149,9 +180,15 @@ class SecretServiceStore:
         # resolution: an edit in the very second a fetch began could leave it unchanged,
         # so only properties with Modified before that second are kept for reuse — any
         # later edit then moves Modified past them. Secrets are always read afresh.
+        # The same holds across a restart: the cache is saved with the second its fetch
+        # began whenever its content changes, so a restart under a clock set back since
+        # drops it.
         began = int(time.time())
         if began < self._known_since:
-            self._known = {}  # the clock went back: Modified no longer orders edits
+            # The clock went back: Modified no longer orders edits. Forget what was read,
+            # the saved copy too and before any read below can fail, or a restart once the
+            # clock caught up again would trust it.
+            self._remember({}, began)
         paths: list[str] = list(
             await self._client.get_property(self._collection, COLLECTION, "Items")
         )
@@ -160,7 +197,9 @@ class SecretServiceStore:
         )
         await self._check_still_unlocked(paths, secrets, fresh.values())
         properties = {path: fresh[path] if path in fresh else self._known[path] for path in paths}
-        self._known = {path: p for path, p in properties.items() if p.modified < began}
+        known = {path: p for path, p in properties.items() if p.modified < began}
+        if known != self._known:
+            self._remember(known, began)
         self._known_since = began
         return [
             StoredItem(
@@ -173,6 +212,13 @@ class SecretServiceStore:
             )
             for path, p in properties.items()
         ]
+
+    def _remember(self, known: dict[str, _Properties], since: int) -> None:
+        """Keep `known`, read by the fetch that began at `since`, in `saved` too if given."""
+        if self._saved is not None:
+            self._saved.set(SAVED_PROPERTIES_KEY, _encode_saved(known, since))
+        self._known = known
+        self._known_since = since
 
     async def _read_changed(self, paths: list[str]) -> dict[str, _Properties]:
         """Read the properties of every item that is new or whose Modified has moved."""
@@ -422,6 +468,70 @@ async def _read_properties(paths: list[str], read: _ReadProperty) -> dict[str, _
         )
         for path, attrs, mtime, label in zip(paths, attributes, modified, labels, strict=True)
     }
+
+
+def _encode_saved(known: dict[str, _Properties], since: int) -> str:
+    items = {path: [p.label, p.attributes, p.created, p.modified] for path, p in known.items()}
+    saved = {"version": _SAVED_VERSION, "since": since, "items": items}
+    return json.dumps(saved, ensure_ascii=False, separators=(",", ":"))
+
+
+def _load_saved(saved: SealedKeyValue | None) -> tuple[dict[str, _Properties], int]:
+    if saved is None:
+        return {}, 0
+    try:
+        raw = saved.get(SAVED_PROPERTIES_KEY)
+    except StateCorruptedError:
+        # Unlike a sync base, this row only saves reads: a damaged one must not keep the
+        # daemon from starting. The next fetch reads every item and seals a new row.
+        raw = None
+    return _decode_saved(raw)
+
+
+def _decode_saved(raw: str | None) -> tuple[dict[str, _Properties], int]:
+    """Read back the saved properties and the second their fetch began.
+
+    The cache only saves reads, so one that is missing, from another version or damaged is
+    dropped and the next fetch reads every item in full.
+    """
+    fields = _json_object(raw)
+    since, items = fields.get("since"), fields.get("items")
+    if fields.get("version") != _SAVED_VERSION or not isinstance(since, int):
+        return {}, 0
+    entries = cast("dict[str, object]", items) if isinstance(items, dict) else {}
+    known = {
+        path: properties
+        for path, entry in entries.items()
+        if (properties := _saved_properties(entry)) is not None
+    }
+    # One damaged entry means the whole row is not what this code wrote.
+    return (known, since) if isinstance(items, dict) and len(known) == len(entries) else ({}, 0)
+
+
+def _json_object(raw: str | None) -> dict[str, object]:
+    """`raw` parsed as a JSON object; empty when it is missing or anything else."""
+    try:
+        value: object = json.loads(raw or "{}")
+    except ValueError:
+        return {}
+    return cast("dict[str, object]", value) if isinstance(value, dict) else {}
+
+
+def _saved_properties(entry: object) -> _Properties | None:
+    match cast("list[object]", entry) if isinstance(entry, list) else []:
+        case [str(label), attributes, None | int() as created, int(modified)] if _is_text_map(
+            attributes
+        ):
+            return _Properties(label, cast("dict[str, str]", attributes), created, modified)
+        case _:
+            return None
+
+
+def _is_text_map(value: object) -> bool:
+    if not isinstance(value, dict):
+        return False
+    pairs = cast("dict[object, object]", value)
+    return all(isinstance(name, str) and isinstance(text, str) for name, text in pairs.items())
 
 
 def _creation_order(ref: str) -> tuple[int, str]:

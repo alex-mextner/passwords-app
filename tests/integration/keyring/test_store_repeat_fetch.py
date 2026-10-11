@@ -9,14 +9,20 @@ tests pin down that every kind of edit between two fetches is still seen.
 
 from __future__ import annotations
 
-import asyncio
 import time
 from typing import TYPE_CHECKING
 
 import pytest
 from dbus_fast import Variant
 from tests.harness.dbus_session import LOGIN_COLLECTION, lock_collection
-from tests.integration.keyring.support import cred, items_of, raw_item, seahorse_create
+from tests.integration.keyring.support import (
+    cred,
+    items_of,
+    next_second,
+    raw_item,
+    seahorse_create,
+    spy_property_reads,
+)
 
 from passwords_app.keyring.client import ITEM, SecretServiceClient
 from passwords_app.sync.ports import LocalUnavailable
@@ -25,23 +31,6 @@ if TYPE_CHECKING:
     from passwords_app.keyring.secret_service import SecretServiceStore
 
 pytestmark = pytest.mark.integration
-
-
-async def next_second() -> None:
-    """Sleep into the next wall-clock second, where gnome-keyring's ``Modified`` ticks."""
-    await asyncio.sleep(1.02 - time.time() % 1)
-
-
-def spy_property_reads(monkeypatch: pytest.MonkeyPatch) -> list[str]:
-    reads: list[str] = []
-    original = SecretServiceClient.get_property
-
-    async def spy(self: SecretServiceClient, path: str, interface: str, name: str) -> object:
-        reads.append(name)
-        return await original(self, path, interface, name)
-
-    monkeypatch.setattr(SecretServiceClient, "get_property", spy)
-    return reads
 
 
 async def test_repeat_fetch_of_unchanged_items_reads_only_their_modified(
