@@ -46,6 +46,8 @@ class SyncStatusButton(Gtk.MenuButton):
         self.heading = Gtk.Label(xalign=0)
         self.heading.add_css_class("heading")
         self.detail = Gtk.Label(xalign=0, wrap=True, max_width_chars=34)
+        self.local_only = Gtk.Label(xalign=0, wrap=True, max_width_chars=34, visible=False)
+        self.local_only.add_css_class("warning")
         self.account = Gtk.Label(xalign=0, wrap=True, max_width_chars=34)
         self.account.add_css_class("dim-label")
         self.account.add_css_class("caption")
@@ -65,6 +67,7 @@ class SyncStatusButton(Gtk.MenuButton):
         for child in (
             self.heading,
             self.detail,
+            self.local_only,
             self.account,
             self.counts,
             self.sync_button,
@@ -72,9 +75,10 @@ class SyncStatusButton(Gtk.MenuButton):
         ):
             box.append(child)
         popover = Gtk.Popover(child=box)
-        popover.connect("show", lambda *_a: self.show_status(self.status))
+        popover.connect("show", lambda *_a: self.show_status(self.status, self.refused))
         self.set_popover(popover)
         self.status = Status(state=SyncState.SYNCING)
+        self.refused = 0
         self.show_status(self.status)
 
     def _sync_clicked(self, _button: Gtk.Button) -> None:
@@ -85,11 +89,13 @@ class SyncStatusButton(Gtk.MenuButton):
         self.popdown()
         self._on_sign_in()
 
-    def show_status(self, status: Status) -> None:
-        self.status = status
-        title = formatting.status_title(status)
+    def show_status(self, status: Status, refused: int = 0) -> None:
+        """Show `status`; `refused` passwords iCloud will not store turn "Synced" into a warning."""
+        self.status, self.refused = status, refused
+        warn = refused > 0 and status.state is SyncState.IDLE
+        title = formatting.status_title(status, refused=warn)
         self.content.set_label(title)
-        self.content.set_icon_name(formatting.status_icon(status))
+        self.content.set_icon_name(formatting.status_icon(status, refused=warn))
         detail = formatting.status_detail(status, self._now())
         self.set_tooltip_text(detail)
         self.update_property(
@@ -97,7 +103,7 @@ class SyncStatusButton(Gtk.MenuButton):
             [_("Sync status: {status}").format(status=title)],
         )
         for css, wanted in (
-            ("warning", status.state in {SyncState.PAUSED, SyncState.OFFLINE}),
+            ("warning", warn or status.state in {SyncState.PAUSED, SyncState.OFFLINE}),
             ("error", status.state in {SyncState.ERROR, SyncState.UNREACHABLE, *_NEEDS_SIGNIN}),
         ):
             if wanted:
@@ -106,6 +112,14 @@ class SyncStatusButton(Gtk.MenuButton):
                 self.remove_css_class(css)
         self.heading.set_text(title)
         self.detail.set_text(detail)
+        self.local_only.set_visible(refused > 0)
+        self.local_only.set_text(
+            ngettext(
+                "{n} password is on this computer only",
+                "{n} passwords are on this computer only",
+                refused,
+            ).format(n=refused)
+        )
         self.account.set_visible(bool(status.apple_id))
         self.account.set_text(_("Apple Account: {apple_id}").format(apple_id=status.apple_id))
         known = status.state not in {SyncState.UNREACHABLE, SyncState.SIGNED_OUT}

@@ -242,8 +242,11 @@ class DetailPage(Adw.NavigationPage):
         self.stack.add_named(self.empty, "empty")
         self.stack.add_named(self.loading, "loading")
         self.stack.set_visible_child_name("empty")
+        # A password iCloud refuses to store: why, while it stays on this computer only.
+        self.local_banner = Adw.Banner(revealed=False)
         view = Adw.ToolbarView(content=self.stack)
         view.add_top_bar(header)
+        view.add_top_bar(self.local_banner)
         self.set_child(view)
 
     def _run(self, action: str) -> None:
@@ -313,6 +316,7 @@ class DetailPage(Adw.NavigationPage):
         self.trash_reason.set_subtitle(formatting.reason_text(entry.reason))
         self.trash_deleted.set_subtitle(formatting.date_time(entry.deleted_at, now))
         self.edit_button.set_visible(False)
+        self.local_banner.set_revealed(False)
         self.stack.set_visible_child_name("trash")
 
     def _restore(self) -> None:
@@ -342,6 +346,7 @@ class DetailPage(Adw.NavigationPage):
     def _show_empty(self) -> None:
         self.set_title(_("Password"))
         self.edit_button.set_visible(False)
+        self.local_banner.set_revealed(False)
         self.stack.set_visible_child_name("empty")
 
     def show_item(self, item_id: str | None) -> None:
@@ -398,8 +403,18 @@ class DetailPage(Adw.NavigationPage):
         self.created_row.set_subtitle(formatting.date_time(item.created, now))
         self.modified_row.set_subtitle(formatting.date_time(item.modified, now))
         self.edit_button.set_visible(True)
+        self._render_sync_problem(item)
         self.stack.set_visible_child_name("view")
         self.emit("mode-changed")
+
+    def _render_sync_problem(self, item: Item) -> None:
+        if item.sync_problem:
+            self.local_banner.set_title(
+                _("On this computer only: iCloud did not accept this password. {reason}").format(
+                    reason=formatting.sync_problem_text(item.sync_problem)
+                )
+            )
+        self.local_banner.set_revealed(bool(item.sync_problem))
 
     def _show_icon(self, serial: int, texture: Gdk.Texture | None) -> None:
         if serial == self._serial:

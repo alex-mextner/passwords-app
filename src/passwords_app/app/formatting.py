@@ -108,8 +108,10 @@ def reason_text(reason: TrashReason) -> str:
     return texts.get(reason, pgettext("why an item is in Deleted", "Deleted"))
 
 
-def status_title(status: Status) -> str:
-    """Short label for the header button."""
+def status_title(status: Status, *, refused: bool = False) -> str:
+    """Short label for the header button; `refused`: iCloud refuses some password."""
+    if refused and status.state is SyncState.IDLE:
+        return _("Not All Synced")
     titles = {
         SyncState.IDLE: _("Synced"),
         SyncState.SYNCING: _("Syncing…"),
@@ -123,7 +125,9 @@ def status_title(status: Status) -> str:
     return titles[status.state]
 
 
-def status_icon(status: Status) -> str:
+def status_icon(status: Status, *, refused: bool = False) -> str:
+    if refused and status.state is SyncState.IDLE:
+        return "dialog-warning-symbolic"
     icons = {
         SyncState.IDLE: "pa-synced-symbolic",
         SyncState.SYNCING: "pa-syncing-symbolic",
@@ -135,6 +139,23 @@ def status_icon(status: Status) -> str:
         SyncState.UNREACHABLE: "dialog-warning-symbolic",
     }
     return icons[status.state]
+
+
+# The daemon's wording for refusals it knows (sync.remote_icloud.DUPLICATE_LOGIN), so the
+# app can show them translated; any other reason is shown as the daemon wrote it.
+_SYNC_PROBLEMS = {
+    "another password for this website and username already exists": _n_(
+        "Another password for this website and username already exists."
+    ),
+}
+
+
+def sync_problem_text(problem: str) -> str:
+    """Say why iCloud refuses to store a password, from the item's sync_problem."""
+    known = _SYNC_PROBLEMS.get(problem)
+    if known is not None:
+        return _(known)
+    return problem if problem.endswith(".") else f"{problem}."
 
 
 def status_detail(  # noqa: PLR0911 - one early return per sync state reads as the spec's table

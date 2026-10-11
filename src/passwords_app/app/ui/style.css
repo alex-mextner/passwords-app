@@ -43,6 +43,15 @@
 
 .item-row { padding: 6px 4px; }
 .item-row .title { font-weight: 600; }
+/* A password iCloud refuses to store; tinted like libadwaita's warning text. */
+.local-only-badge {
+  font-size: smaller;
+  font-weight: 600;
+  color: var(--warning-color, #9c6e03);
+  background-color: alpha(currentColor, 0.14);
+  border-radius: 999px;
+  padding: 2px 8px;
+}
 
 .detail-title { font-size: 22pt; font-weight: 800; }
 .detail-header { margin-top: 6px; margin-bottom: 12px; }

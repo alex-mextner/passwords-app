@@ -58,11 +58,36 @@ def test_every_header_status_fits_untruncated(app: support.AppUnderTest) -> None
     original = button.status
     try:
         for state in SyncState:
-            button.show_status(Status(state=state))
-            support.pump(0.1)
-            assert not label.get_layout().is_ellipsized(), label.get_text()
+            for refused in (0, 1):
+                button.show_status(Status(state=state), refused)
+                support.pump(0.1)
+                assert not label.get_layout().is_ellipsized(), label.get_text()
     finally:
         button.show_status(original)
+
+
+def test_a_refused_password_is_explained_in_russian(app: support.AppUnderTest) -> None:
+    from tests.gui.test_sync_problem import DUPLICATE  # noqa: PLC0415
+
+    app.wait_scanned()
+    item_id = next(
+        c.id for c in app.call(lambda d: list(d.items.values())) if c.title == "Northwind Mail"
+    )
+    app.call(lambda d: d.refuse(item_id, DUPLICATE))
+    support.wait_until(lambda: app.vault.count_refused() == 1, what="refusal reloaded")
+    app.select("Northwind Mail")
+    assert app.window.list_page.select_id(item_id)  # scrolls its row into view
+    banner = app.window.detail.local_banner
+    support.wait_until(banner.get_revealed, what="banner")
+    assert banner.get_title() == (
+        "Только на этом компьютере: iCloud не принял этот пароль. "
+        "Для этого сайта и имени пользователя уже есть другой пароль."
+    )
+    assert app.window.status_button.content.get_label() == "Не все в iCloud"  # noqa: RUF001 - Russian
+    support.wait_until(
+        lambda: "Только на этом компьютере" in support.visible_texts(app.window), what="badge"
+    )
+    assert _english_leftovers(app.window) == []
 
 
 def test_main_window_has_no_english_left(app: support.AppUnderTest) -> None:

@@ -21,6 +21,7 @@ from dbus_fast.annotations import DBusBool, DBusDict, DBusSignature, DBusStr
 from dbus_fast.errors import DBusError
 from dbus_fast.service import ServiceInterface, dbus_method, dbus_signal
 
+from passwords_app.core.model import Credential
 from passwords_app.daemon import INTERFACE
 from passwords_app.daemon.controller import Daemon
 from passwords_app.daemon.errors import DaemonError
@@ -95,13 +96,16 @@ class PasswordsService(ServiceInterface):
     async def list_items(self) -> DictList:
         self._d.touch()
         with _replies():
-            return [item_dict(c) for c in await self._d.list_items()]
+            return [self._item(c) for c in await self._d.list_items()]
 
     @dbus_method(name="Get")
     async def get(self, id: DBusStr) -> DBusDict:  # noqa: A002 - XML arg name
         self._d.touch()
         with _replies():
-            return item_dict(await self._d.get(id), secrets=True)
+            return self._item(await self._d.get(id), secrets=True)
+
+    def _item(self, c: Credential, *, secrets: bool = False) -> dict[str, Variant]:
+        return item_dict(c, secrets=secrets, sync_problem=self._d.sync_problem(c.id))
 
     @dbus_method(name="Save")
     async def save(self, item: DBusDict) -> DBusStr:
@@ -155,7 +159,7 @@ class PasswordsService(ServiceInterface):
     async def match(self, url: DBusStr) -> DictList:
         self._d.touch()
         with _replies():
-            return [item_dict(c) for c in await self._d.match(url)]
+            return [self._item(c) for c in await self._d.match(url)]
 
     @dbus_method(name="GetCode")
     async def get_code(self, id: DBusStr) -> CodeReply:  # noqa: A002 - XML arg name

@@ -13,8 +13,9 @@ API summary:
 - Knobs: `latency` (s, slept at the start of every method), `sync_duration`, `join_duration`,
   `require_2fa`, `apple_password`, `verification_code`, `device_passcode`, `clock`.
 - Hooks (call on the daemon's loop): `set_state`, `start_syncing`, `go_idle`, `go_offline`,
-  `require_signin`, `sign_out`, `pause`, `set_error`, `add_item`. Status changes emit
-  StatusChanged; item changes emit ItemsChanged.
+  `require_signin`, `sign_out`, `pause`, `set_error`, `add_item`, `refuse`/`accept` (iCloud
+  refuses or takes one login: its `sync_problem`). Status changes emit StatusChanged; item
+  changes emit ItemsChanged.
 - `fail_next(method, error_name, message)`: the next call of D-Bus `method` raises that error.
 - `calls`: D-Bus method names in call order (never arguments: they may be secrets).
 - `FakeDaemon.demo(now)`: seeded with `demo_dataset`, signed in and idle.
@@ -87,8 +88,9 @@ _SAVE_KEYS: Final = {
     "created": "x",
     "modified": "x",
     "has_code": "b",
+    "sync_problem": "s",
 }
-_READ_ONLY_KEYS: Final = frozenset({"created", "modified", "has_code"})
+_READ_ONLY_KEYS: Final = frozenset({"created", "modified", "has_code", "sync_problem"})
 _OPTIONAL_TEXT: Final = frozenset({"title", "notes", "otpauth", "group"})
 
 # Apple's default device names use the typographic apostrophe.
@@ -116,7 +118,7 @@ def _error(name: str, message: str) -> DBusError:
     return DBusError(name if "." in name else ERROR_PREFIX + name, message)
 
 
-def item_dict(c: Credential, *, secrets: bool = False) -> VariantDict:
+def item_dict(c: Credential, *, secrets: bool = False, sync_problem: str = "") -> VariantDict:
     """Wire form of a credential; `secrets` adds password + otpauth (Get() only)."""
     d: VariantDict = {
         "id": Variant("s", c.id),
@@ -129,6 +131,7 @@ def item_dict(c: Credential, *, secrets: bool = False) -> VariantDict:
         "created": Variant("x", _ms(c.created)),
         "modified": Variant("x", _ms(c.modified)),
         "has_code": Variant("b", bool(c.otpauth)),
+        "sync_problem": Variant("s", sync_problem),
     }
     if secrets:
         d["password"] = Variant("s", c.password)
@@ -172,6 +175,8 @@ class FakeDaemon(ServiceInterface):
         self.calls: list[str] = []
         self.items: dict[str, Credential] = {c.id: c for c in items}
         self.trash: dict[str, TrashEntry] = {e.trash_id: e for e in trash}
+        # Item id -> why iCloud refuses to store it (the item dicts' sync_problem).
+        self.sync_problems: dict[str, str] = {}
         self._state: State = state
         self._apple_id = apple_id
         self._message = ""
@@ -327,6 +332,26 @@ class FakeDaemon(ServiceInterface):
         self._items_changed([c.id])
         return c.id
 
+    def refuse(self, item_id: str, reason: str) -> None:
+        """As if iCloud refused to store this login: the daemon's status and sync_problem."""
+        c = self._get_item(item_id)
+        self.sync_problems[item_id] = reason
+        self.items_changed([item_id])
+        self._last_sync = self.clock()
+        self.set_state(
+            "idle",
+            f"iCloud did not accept the password for {c.username} on {c.url}: {reason}. "
+            "Everything else is syncing; edit or delete this password to fix it.",
+        )
+
+    def accept(self, item_id: str) -> None:
+        """As if iCloud took a login it refused before."""
+        del self.sync_problems[item_id]
+        if not self.sync_problems:
+            self._message = ""
+        self.items_changed([item_id])
+        self._publish_status()
+
     # ------------------------------------------------------------------ internals
 
     def _status_values(self) -> dict[str, object]:
@@ -449,12 +474,15 @@ class FakeDaemon(ServiceInterface):
     @dbus_method(name="List")
     async def list_items(self) -> DBusVardictList:
         await self._enter("List")
-        return [item_dict(c) for c in self.items.values()]
+        return [self._item(c) for c in self.items.values()]
 
     @dbus_method(name="Get")
     async def get(self, item_id: DBusStr) -> DBusVardict:
         await self._enter("Get")
-        return item_dict(self._get_item(item_id), secrets=True)
+        return self._item(self._get_item(item_id), secrets=True)
+
+    def _item(self, c: Credential, *, secrets: bool = False) -> VariantDict:
+        return item_dict(c, secrets=secrets, sync_problem=self.sync_problems.get(c.id, ""))
 
     @dbus_method(name="Save")
     async def save(self, item: DBusVardict) -> DBusStr:
@@ -469,6 +497,7 @@ class FakeDaemon(ServiceInterface):
         await self._enter("Delete")
         self._get_item(item_id)
         self._to_trash(item_id, "deleted-on-linux")
+        self.sync_problems.pop(item_id, None)
         self._items_changed([item_id])
 
     @dbus_method(name="ListTrash")
@@ -498,7 +527,7 @@ class FakeDaemon(ServiceInterface):
         await self._enter("Match")
         kinds = [(urls.match(url, c), c) for c in self.items.values()]
         return [
-            item_dict(c)
+            self._item(c)
             for wanted in (MatchKind.EXACT_HOST, MatchKind.SAME_SITE)
             for kind, c in kinds
             if kind is wanted
