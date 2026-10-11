@@ -16,6 +16,7 @@ from tests.integration.keyring.support import cred, items_of, raw_item, seahorse
 from passwords_app.keyring.client import TEXT, SecretServiceClient
 from passwords_app.keyring.mapping import item_content
 from passwords_app.keyring.secret_service import SecretServiceStore
+from passwords_app.sync.ports import ConflictError
 
 if TYPE_CHECKING:
     from dbus_fast.aio import MessageBus
@@ -246,3 +247,52 @@ async def test_write_is_stamped_when_it_happens_not_when_it_was_requested(
     _, attributes, _ = await raw_item(seahorse, path)
     assert attributes["pa-synced"] == str(stamp)
     assert dict((await store.fetch()).items) == {cred(1).id: cred(1)}
+
+
+# ---------------------------------------------------------------- conditional writes
+
+
+async def _edit_in_seahorse(seahorse: SecretServiceClient, store: SecretServiceStore) -> None:
+    (path,) = await items_of(seahorse, store.collection)
+    await seahorse.set_secret(path, b"FAKE-TYPED-IN-SEAHORSE")
+
+
+async def test_conditional_update_of_the_version_read_writes(store: SecretServiceStore) -> None:
+    await store.upsert(cred(1))
+    changed = cred(1, pw="FAKE-NEW")
+    await store.upsert(changed, expected=cred(1).content_hash())
+    assert (await store.fetch()).items[changed.id] == changed
+
+
+async def test_conditional_update_refuses_an_item_edited_since(
+    store: SecretServiceStore, seahorse: SecretServiceClient
+) -> None:
+    await store.upsert(cred(1))
+    await _edit_in_seahorse(seahorse, store)
+    with pytest.raises(ConflictError):
+        await store.upsert(cred(1, pw="FAKE-NEW"), expected=cred(1).content_hash())
+    assert (await store.fetch()).items[cred(1).id].password == "FAKE-TYPED-IN-SEAHORSE"
+
+
+async def test_conditional_update_refuses_an_item_deleted_since(
+    store: SecretServiceStore,
+) -> None:
+    with pytest.raises(ConflictError):
+        await store.upsert(cred(1), expected=cred(1).content_hash())
+    assert dict((await store.fetch()).items) == {}
+
+
+async def test_conditional_delete_refuses_an_item_edited_since(
+    store: SecretServiceStore, seahorse: SecretServiceClient
+) -> None:
+    await store.upsert(cred(1))
+    await _edit_in_seahorse(seahorse, store)
+    with pytest.raises(ConflictError):
+        await store.delete(cred(1).id, expected=cred(1).content_hash())
+    assert set((await store.fetch()).items) == {cred(1).id}
+    await store.delete(cred(1).id, expected=None)
+    assert dict((await store.fetch()).items) == {}
+
+
+async def test_conditional_delete_of_a_missing_item_is_a_no_op(store: SecretServiceStore) -> None:
+    await store.delete("NOT-THERE", expected=cred(1).content_hash())

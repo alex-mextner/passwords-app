@@ -349,9 +349,9 @@ async def test_a_delete_the_locked_keyring_refused_leaves_no_ghost_once_it_is_re
     local.put(make_credential("A"))
     original = local.delete
 
-    async def lock_first(item_id: str) -> None:
+    async def lock_first(item_id: str, *, expected: str | None = None) -> None:
         local.lock()  # between the delete's read and its write
-        await original(item_id)
+        await original(item_id, expected=expected)
 
     local.delete = lock_first  # type: ignore[method-assign]
     with pytest.raises(LockedError):
@@ -379,8 +379,8 @@ def lose_the_reply(local: MemoryLocal, *, then_lock: bool) -> None:
     """The keyring deletes, but the daemon only sees an error (and maybe a lock)."""
     original = local.delete
 
-    async def delete_then_fail(item_id: str) -> None:
-        await original(item_id)
+    async def delete_then_fail(item_id: str, *, expected: str | None = None) -> None:
+        await original(item_id, expected=expected)
         if then_lock:
             local.lock()
         msg = "the reply was lost"
@@ -498,6 +498,26 @@ async def test_restore_into_a_locked_keyring_keeps_the_entry(
     with pytest.raises(LockedError):
         await daemon.restore(entry.trash_id)
     assert [e.trash_id for e in daemon.trash()] == [entry.trash_id]
+
+
+async def test_restore_over_a_login_edited_meanwhile_asks_to_retry(
+    local: MemoryLocal, daemon: Daemon
+) -> None:
+    local.put(make_credential("A", password="fake-old"))
+    await daemon.sync_now()
+    await daemon.delete("A")
+    (entry,) = daemon.trash()
+    local.put(make_credential("B", url=make_credential("A").url, password="fake-live"))
+
+    async def seahorse_edits_the_twin(_: str) -> None:
+        local.on_write = None
+        local.put(make_credential("B", url=make_credential("A").url, password="fake-typed"))
+
+    local.on_write = seahorse_edits_the_twin
+    with pytest.raises(UnavailableError, match="changed while it was being restored"):
+        await daemon.restore(entry.trash_id)
+    assert local.items["B"].password == "fake-typed"
+    assert entry.trash_id in [e.trash_id for e in daemon.trash()]
 
 
 async def test_purge(local: MemoryLocal, daemon: Daemon, events: Events) -> None:
@@ -895,8 +915,8 @@ async def test_user_edit_during_a_cycle_still_syncs(
     remote.put(make_credential("B"))
     original = local.upsert
 
-    async def upsert_then_user_edit(credential: Credential) -> None:
-        await original(credential)
+    async def upsert_then_user_edit(credential: Credential, *, expected: str | None = None) -> None:
+        await original(credential, expected=expected)
         if credential.id == "B":  # the user adds an item while the cycle is still writing
             local.put(make_credential("NEW"))
 

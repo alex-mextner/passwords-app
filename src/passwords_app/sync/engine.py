@@ -5,13 +5,17 @@
 The engine refuses to plan from anything less than two complete snapshots: a locked keyring
 or a failed iCloud fetch skips the cycle, because the planner reads "missing" as "deleted".
 Each write is followed by its base update, and a conditional write that loses a race only
-abandons that item; the next cycle re-plans it from fresh data. An upload iCloud refuses
-for that item alone (`ItemRejected`) is set aside the same way and retried on its own
-backoff schedule, so one bad login never holds up the rest or reads as an outage.
+abandons that item; the next cycle re-plans it from fresh data. Keyring writes are
+conditional on the version the plan was made from, so an edit made in Seahorse while the
+cycle runs is never overwritten unseen. An upload iCloud refuses for that item alone
+(`ItemRejected`) is set aside the same way and retried on its own backoff schedule, so one
+bad login never holds up the rest or reads as an outage. Cycles and restores run one at a
+time, so a restore's view of the keyring cannot go stale before it writes.
 """
 
 from __future__ import annotations
 
+import asyncio
 import dataclasses
 import json
 import uuid
@@ -66,6 +70,8 @@ if TYPE_CHECKING:
 
 LAST_SYNC_KEY = "last-sync"
 UPLOAD_FAILURES_KEY = "upload-failures"
+# Ids of logins restored over their live twin, not yet settled by a sync (see `restore`).
+RESTORED_KEY = "restored"
 
 # `SyncReport.skipped_reason` values; the daemon maps them to its status state.
 SKIP_LOCAL = "local-unavailable"
@@ -198,6 +204,22 @@ def _decode_refusals(raw: str) -> dict[str, _Refusal]:
     }
 
 
+@dataclasses.dataclass(slots=True)
+class _Pass:
+    """What one cycle's execution of its plan shares across actions."""
+
+    now: datetime
+    refusals: _Refusals
+    read: Mapping[str, Credential]  # the keyring as the plan saw it
+    counts: Counter[str] = dataclasses.field(default_factory=Counter[str])
+    abandoned: set[str] = dataclasses.field(default_factory=set[str])  # left for the next cycle
+
+    def expected(self, item_id: str) -> str | None:
+        """Return the content hash a keyring write must replace: the version planned against."""
+        current = self.read.get(item_id)
+        return None if current is None else current.content_hash()
+
+
 class SyncEngine:
     def __init__(  # noqa: PLR0913 - the stores, the state, and two optional seams
         self,
@@ -216,32 +238,36 @@ class SyncEngine:
         self._policy = policy if policy is not None else SyncPolicy()
         self._clock = clock
         self._on_upload_rejected = on_upload_rejected
+        self._busy = asyncio.Lock()
 
     # ------------------------------------------------------------------ cycles
 
     async def run_once(self) -> SyncReport:
         """Run one sync cycle; never raises for store outages (they become `skipped_reason`)."""
-        return await self._cycle(None)
+        async with self._busy:
+            return await self._cycle(None)
 
     async def resolve_pause(self, *, apply: bool) -> SyncReport:
         """Answer a mass-delete pause: apply the held deletions, or restore the items."""
-        pending = self._state.pending()
-        if pending is None:
-            msg = "no deletions are waiting for a decision"
-            raise NoPendingDeletionsError(msg)
-        return await self._cycle(PauseDecision(pending, apply=apply))
+        async with self._busy:
+            pending = self._state.pending()
+            if pending is None:
+                msg = "no deletions are waiting for a decision"
+                raise NoPendingDeletionsError(msg)
+            return await self._cycle(PauseDecision(pending, apply=apply))
 
     async def _cycle(self, decision: PauseDecision | None) -> SyncReport:
         started = self._clock()
         self._state.purge_older_than(started - self._policy.trash_retention)
         try:
-            # iCloud first: its fetch is the slow one, and the keyring snapshot must be as
-            # fresh as possible because keyring writes cannot be made conditional.
+            # iCloud first: its fetch is the slow one, and the keyring snapshot should be as
+            # fresh as possible: a keyring write that finds the item edited since is skipped.
             remote = await self._fetch_remote()
             local = await self._fetch_local()
         except _Abort as abort:
             return SyncReport(started, self._clock(), skipped_reason=abort.reason)
 
+        restored = self._restored()
         sync_plan = plan(
             self._state.bases(),
             remote,
@@ -249,9 +275,12 @@ class SyncEngine:
             self._policy,
             decision=decision,
             held=None if decision is not None else self._state.pending(),
+            restored=restored,
         )
         refusals = _Refusals(self._state, self._policy, started, self._on_upload_rejected)
-        counts, skipped = await self._execute(sync_plan, started, refusals)
+        run = _Pass(started, refusals, local.items)
+        skipped = await self._execute(sync_plan, run)
+        counts = run.counts
         refusals.save(complete=skipped is None)
         if skipped is None:
             # Pending is replaced only after a complete pass, so an interrupted cycle keeps
@@ -259,6 +288,9 @@ class SyncEngine:
             self._state.set_pending(sync_plan.pending)
             if sync_plan.pending is None:
                 self._state.set(LAST_SYNC_KEY, started.isoformat())
+            # A restore is settled once a complete cycle carried it out; one whose write
+            # lost a race or was refused keeps winning until it gets through.
+            self._set_restored(restored & run.abandoned)
         return SyncReport(
             started,
             self._clock(),
@@ -290,10 +322,8 @@ class SyncEngine:
         except RemoteUnavailable as exc:
             raise _Abort(SKIP_REMOTE) from exc
 
-    async def _execute(
-        self, sync_plan: SyncPlan, now: datetime, refusals: _Refusals
-    ) -> tuple[Counter[str], str | None]:
-        counts: Counter[str] = Counter()
+    async def _execute(self, sync_plan: SyncPlan, run: _Pass) -> str | None:
+        """Apply the plan; return the skip reason that ended it early, if any."""
         copies = [a for a in sync_plan.actions if isinstance(a, Trash)]
         writes = [a for a in sync_plan.actions if not isinstance(a, Trash)]
         # Every trash copy is committed before any store write that could destroy its
@@ -301,27 +331,28 @@ class SyncEngine:
         # Base updates share one transaction: a lost one is re-derived by the next cycle.
         with self._state.transaction():
             for copy in copies:
-                await self._apply_local(copy, now, counts)
+                await self._apply_local(copy, run)
         with self._state.transaction():
             for action in writes:
-                skip = await self._apply_write(action, now, counts, refusals)
+                skip = await self._apply_write(action, run)
                 if skip is not None:
-                    return counts, skip
-        return counts, None
+                    return skip
+        return None
 
-    async def _apply_write(
-        self, action: Action, now: datetime, counts: Counter[str], refusals: _Refusals
-    ) -> str | None:
+    async def _apply_write(self, action: Action, run: _Pass) -> str | None:
         """Apply one store write; return the skip reason that ends the cycle, if any."""
         try:
             match action:
                 case Trash() | CreateLocal() | UpdateLocal() | DeleteLocal() | ForkLocal():
-                    await self._apply_local(action, now, counts)
+                    await self._apply_local(action, run)
                 case _:
-                    await self._apply_remote(action, counts, refusals)
+                    await self._apply_remote(action, run)
         except ConflictError:
-            # The planner puts an item's iCloud write last in its group, so a lost
-            # race leaves nothing of that item pending; the next cycle re-plans it.
+            # iCloud's record or the keyring item changed since it was read. The planner
+            # puts an item's iCloud write last in its group and keeps every version it
+            # overwrites in trash first, so dropping the action loses nothing; the next
+            # cycle re-plans the item from fresh data.
+            run.abandoned.add(action.item_id)
             return None
         except LocalUnavailable:
             return SKIP_LOCAL
@@ -332,31 +363,28 @@ class SyncEngine:
         return None
 
     async def _apply_local(
-        self,
-        action: Trash | CreateLocal | UpdateLocal | DeleteLocal | ForkLocal,
-        now: datetime,
-        counts: Counter[str],
+        self, action: Trash | CreateLocal | UpdateLocal | DeleteLocal | ForkLocal, run: _Pass
     ) -> None:
-        state = self._state
+        state, local, counts = self._state, self._local, run.counts
         match action:
             case Trash(credential, reason):
-                entry = _trash_entry(credential, reason, now)
+                entry = _trash_entry(credential, reason, run.now)
                 if state.add_trash(entry) and reason == "conflict":
                     counts["conflicts"] += 1
             case CreateLocal(credential, etag):
-                await self._local.upsert(credential)
+                await local.upsert(credential, expected=run.expected(credential.id))
                 state.set_base(BaseEntry(credential, etag))
                 counts["created_local"] += 1
             case UpdateLocal(credential, etag):
-                await self._local.upsert(credential)
+                await local.upsert(credential, expected=run.expected(credential.id))
                 state.set_base(BaseEntry(credential, etag))
                 counts["updated_local"] += 1
             case DeleteLocal(item_id):
-                await self._local.delete(item_id)
+                await local.delete(item_id, expected=run.expected(item_id))
                 state.drop_base(item_id)
                 counts["deleted_local"] += 1
             case ForkLocal(credential, _):
-                await self._local.upsert(credential)
+                await local.upsert(credential, expected=run.expected(credential.id))
                 counts["created_local"] += 1
             case _:
                 assert_never(action)
@@ -364,17 +392,20 @@ class SyncEngine:
     async def _apply_remote(
         self,
         action: CreateRemote | UpdateRemote | DeleteRemote | Link | SetBase | DropBase,
-        counts: Counter[str],
-        refusals: _Refusals,
+        run: _Pass,
     ) -> None:
-        state = self._state
+        state, counts = self._state, run.counts
         match action:
             case CreateRemote(credential):
-                if await self._upload(credential, None, refusals):
+                if await self._upload(credential, None, run.refusals):
                     counts["created_remote"] += 1
+                else:
+                    run.abandoned.add(credential.id)
             case UpdateRemote(credential, etag):
-                if await self._upload(credential, etag, refusals):
+                if await self._upload(credential, etag, run.refusals):
                     counts["updated_remote"] += 1
+                else:
+                    run.abandoned.add(credential.id)
             case DeleteRemote(item_id, etag):
                 await self._remote.delete(item_id, etag)
                 state.drop_base(item_id)
@@ -382,8 +413,8 @@ class SyncEngine:
             case Link(local_id, credential, etag):
                 if local_id != credential.id:
                     # Write before delete: a crash in between leaves a duplicate, never a loss.
-                    await self._local.upsert(credential)
-                    await self._local.delete(local_id)
+                    await self._local.upsert(credential, expected=run.expected(credential.id))
+                    await self._local.delete(local_id, expected=run.expected(local_id))
                 state.set_base(BaseEntry(credential, etag))
                 counts["linked"] += 1
             case SetBase(credential, etag):
@@ -426,12 +457,20 @@ class SyncEngine:
         iCloud Keychain keeps one login per site and username, so a version whose twin is
         live in the keyring (a conflict loser and its winner, or the login saved again since)
         cannot come back next to it: it replaces the twin in place, as the current version of
-        that login, and the displaced version goes to trash so nothing is lost. Without a
-        twin a deleted item comes back under its own id while that id is free on this side,
-        so the upload recovers the record iCloud keeps in Recently Deleted rather than adding
-        a duplicate next to it; a conflict loser, or an id that is live again, gets a fresh
-        id, since its original id belongs to another version that must not be overwritten.
+        that login, and the displaced version goes to trash so nothing is lost. Restoring is
+        the user's explicit choice, so the restored login wins over an iCloud edit not synced
+        yet, which goes to trash too. Without a twin a deleted item comes back under its own
+        id while that id is free on this side, so the upload recovers the record iCloud keeps
+        in Recently Deleted rather than adding a duplicate next to it; a conflict loser, or an
+        id that is live again, gets a fresh id, since its original id belongs to another
+        version that must not be overwritten.
+
+        Raises `ConflictError` when the twin is edited while it is being replaced.
         """
+        async with self._busy:
+            return await self._restore(trash_id)
+
+    async def _restore(self, trash_id: str) -> str:
         entry = self._state.get_trash(trash_id)
         if entry is None:
             raise KeyError(trash_id)
@@ -444,32 +483,30 @@ class SyncEngine:
                 item_id = str(uuid.uuid4()).upper()
             restored = dataclasses.replace(entry.credential, id=item_id, modified=now)
             await self._local.upsert(restored)
-        elif content_key(twin) == content_key(entry.credential):
-            restored = twin
-        else:
+            self._state.remove_trash(trash_id)
+            return restored.id
+        if content_key(twin) != content_key(entry.credential):
             restored = dataclasses.replace(entry.credential, id=twin.id, modified=now)
             # Committed before the overwrite and kept even if the write fails: a failed
             # write may still have landed (a lost reply), and then this is the only copy.
             self._state.add_trash(_trash_entry(twin, "conflict", now))
-            await self._local.upsert(restored)
-            with self._state.transaction():
-                self._mark_restored_as_edit(twin, restored)
-                self._state.remove_trash(trash_id)
-            return restored.id
-        self._state.remove_trash(trash_id)
-        return restored.id
+            await self._local.upsert(restored, expected=twin.content_hash())
+        with self._state.transaction():
+            # Even a version equal to its twin (often the one both sides last agreed on)
+            # must not read as "no keyring change" that a pending iCloud edit overwrites.
+            self._set_restored(self._restored() | {twin.id})
+            self._state.remove_trash(trash_id)
+        return twin.id
 
-    def _mark_restored_as_edit(self, displaced: Credential, restored: Credential) -> None:
-        """Make the planner see the restore as an edit of `displaced` into `restored`.
+    def _restored(self) -> frozenset[str]:
+        raw = self._state.get(RESTORED_KEY)
+        return frozenset(json.loads(raw)) if raw else frozenset()
 
-        Restoring the version both sides last agreed on would otherwise read as "no change
-        in the keyring", and a pending iCloud edit of the login would overwrite it unseen.
-        Recording the displaced version as the agreed one makes the restore compete like
-        any keyring edit: newer wins, the loser goes to trash.
-        """
-        base = self._state.bases().get(restored.id)
-        if base is not None and content_key(base.credential) == content_key(restored):
-            self._state.set_base(BaseEntry(displaced, base.etag))
+    def _set_restored(self, ids: frozenset[str]) -> None:
+        if ids:
+            self._state.set(RESTORED_KEY, json.dumps(sorted(ids)))
+        else:
+            self._state.delete(RESTORED_KEY)
 
     def _live_twin(self, version: Credential, live: Mapping[str, Credential]) -> Credential | None:
         """Return the keyring login iCloud would see as the same login as `version`, if any."""

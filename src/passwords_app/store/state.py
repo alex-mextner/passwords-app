@@ -231,17 +231,31 @@ class StateStore:
     # ------------------------------------------------------------------ trash
 
     def add_trash(self, entry: TrashEntry) -> bool:
-        """Store `entry`; returns False when that trash id is already stored (idempotent)."""
+        """Store `entry`; returns False when that trash id is already stored (idempotent).
+
+        Adding a stored entry again with a later date moves its date forward: the same
+        version lost again (a repeated conflict) is kept for a full retention from then.
+        """
         deleted_at = _ts(entry.deleted_at)
         blob = self._seal(
             _encode_credential(entry.credential),
             self._trash_aad(entry.trash_id, deleted_at, entry.reason),
         )
-        cur = self._db.execute(
-            "INSERT OR IGNORE INTO trash (trash_id, deleted_at, reason, blob) VALUES (?, ?, ?, ?)",
-            (entry.trash_id, deleted_at, entry.reason, blob),
-        )
-        return cur.rowcount == 1
+        row = self._db.execute(
+            "SELECT deleted_at FROM trash WHERE trash_id = ?", (entry.trash_id,)
+        ).fetchone()
+        if row is None:
+            self._db.execute(
+                "INSERT INTO trash (trash_id, deleted_at, reason, blob) VALUES (?, ?, ?, ?)",
+                (entry.trash_id, deleted_at, entry.reason, blob),
+            )
+            return True
+        if deleted_at > row[0]:
+            self._db.execute(
+                "UPDATE trash SET deleted_at = ?, reason = ?, blob = ? WHERE trash_id = ?",
+                (deleted_at, entry.reason, blob, entry.trash_id),
+            )
+        return False
 
     def _trash_row(self, trash_id: str, deleted_at: str, reason: str, blob: bytes) -> TrashEntry:
         plaintext = self._open(blob, self._trash_aad(trash_id, deleted_at, reason))

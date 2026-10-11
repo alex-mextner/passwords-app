@@ -180,6 +180,29 @@ async def test_local_delete_of_missing_item_is_a_no_op() -> None:
     assert local.items == {}
 
 
+async def test_local_conditional_writes_refuse_an_item_changed_since_it_was_read() -> None:
+    a = make_credential("A")
+    local = MemoryLocal({"A": make_credential("A", password="fake-edited")})
+    with pytest.raises(ConflictError):
+        await local.upsert(make_credential("A", password="fake-new"), expected=a.content_hash())
+    with pytest.raises(ConflictError):
+        await local.delete("A", expected=a.content_hash())
+    with pytest.raises(ConflictError):
+        await local.upsert(make_credential("GONE"), expected=a.content_hash())
+    assert local.items["A"].password == "fake-edited"
+    assert "GONE" not in local.items
+
+
+async def test_local_conditional_writes_of_the_version_read_apply() -> None:
+    a = make_credential("A")
+    local = MemoryLocal({"A": a})
+    await local.upsert(make_credential("A", password="fake-new"), expected=a.content_hash())
+    edited = local.items["A"]
+    await local.delete("A", expected=edited.content_hash())
+    await local.delete("A", expected=edited.content_hash())  # already gone: a no-op
+    assert local.items == {}
+
+
 async def test_local_snapshot_carries_rejected_items() -> None:
     from passwords_app.sync.ports import RejectedLocalItem  # noqa: PLC0415
 

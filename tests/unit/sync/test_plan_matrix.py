@@ -343,3 +343,19 @@ def test_edited_fork_from_an_interrupted_cycle_does_not_vouch_for_the_original()
     assert result.actions.index(Trash(local, "conflict")) < result.actions.index(
         UpdateLocal(remote, "e1")
     )
+
+
+def test_a_fork_left_by_a_cancelled_cycle_is_uploaded_not_linked_back() -> None:
+    # #17: the cycle saved the copy and overwrote the original with iCloud's version, then
+    # was cancelled before its base updates committed. The copy shares site, account and
+    # password with iCloud's version, but linking them would put it back in trash.
+    remote = make_credential("SAME", modified=5, notes="from the iPhone")
+    local = make_credential("SAME", modified=9, notes="mine")
+    copy = dataclasses.replace(local, id=fork_id("SAME", local))
+    result = plan(
+        {},
+        RemoteSnapshot({"SAME": RemoteItem(remote, "e1")}),
+        LocalSnapshot({"SAME": remote, copy.id: copy}),
+        POLICY,
+    )
+    assert set(result.actions) == {Link("SAME", remote, "e1"), CreateRemote(copy)}

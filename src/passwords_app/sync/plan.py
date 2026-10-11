@@ -275,10 +275,20 @@ def _link_pairs(
     pairs: list[tuple[str, str]] = []
     for lid in local_new:
         key = _link_key(local[lid])
-        matches = candidates.get(key) if key is not None else None
-        if matches:
-            pairs.append((lid, matches.popleft()))
+        rid = _take_match(lid, local[lid], candidates.get(key)) if key is not None else None
+        if rid is not None:
+            pairs.append((lid, rid))
     return pairs
+
+
+def _take_match(lid: str, loc: Credential, matches: deque[str] | None) -> str | None:
+    """Remove and return the first remote id in `matches` that `loc` may link to."""
+    # A copy forked from an iCloud item (see `ForkLocal`) shares its link key, but is the
+    # version that lost the id, waiting for its own upload: linking it back would trash it.
+    rid = next((r for r in matches or () if lid != fork_id(r, loc)), None)
+    if rid is not None and matches is not None:
+        matches.remove(rid)
+    return rid
 
 
 def _too_many(policy: SyncPolicy, count: int, items: int) -> bool:
@@ -286,9 +296,10 @@ def _too_many(policy: SyncPolicy, count: int, items: int) -> bool:
 
 
 def _keyring_writes_first(groups: list[tuple[Action, ...]]) -> tuple[Action, ...]:
-    # Keyring writes cannot be conditional, so they run before any iCloud round trip
-    # that would widen the window for overwriting a user's fresh edit unseen. The sort
-    # is stable and moves whole groups, so dependencies inside a group are kept.
+    # Keyring writes run before any iCloud round trip: a conditional keyring write that
+    # loses to a fresh edit only postpones its item, but every round trip before it widens
+    # that window. The sort is stable and moves whole groups, so dependencies inside a
+    # group are kept.
     groups.sort(key=lambda group: not any(isinstance(a, _KEYRING_WRITES) for a in group))
     return tuple(a for group in groups for a in group)
 
@@ -312,6 +323,8 @@ class _Planner:
         self.approved_local = frozenset(approve.pending.local_ids) if approve else none
         self.approved_remote = frozenset(approve.pending.remote_ids) if approve else none
         self.local_incomplete = False
+        # Items the user restored from trash over their live login since the last sync.
+        self.restored = none
         # Each group is one item's actions; deletions are tagged so the guard can hold them.
         self.groups: list[tuple[tuple[Action, ...], _Side | None, str]] = []
 
@@ -370,7 +383,11 @@ class _Planner:
         if item is None:
             if loc is None:
                 self.emit(item_id, Trash(b.credential, "deleted-both"), DropBase(item_id))
-            elif content_key(loc) != bkey or item_id in self.restore_local:
+            elif (
+                content_key(loc) != bkey
+                or item_id in self.restore_local
+                or item_id in self.restored
+            ):
                 # Edit beats delete (or the user chose to restore the held deletion).
                 self.emit(item_id, CreateRemote(loc))
             else:
@@ -403,17 +420,27 @@ class _Planner:
         rkey = content_key(item.credential)
         lkey = content_key(loc)
         remote_changed = rkey != bkey
-        local_changed = lkey != bkey
+        # A restore is the user's explicit choice: it counts as a keyring edit against any
+        # iCloud edit, even when it brought back the version both sides last agreed on.
+        restored = item_id in self.restored
+        local_changed = lkey != bkey or (restored and remote_changed)
         if not remote_changed and not local_changed:
             if item.etag != b.etag:
                 self.emit(item_id, SetBase(item.credential, item.etag))
-        elif remote_changed and not local_changed:
+        elif not local_changed:
             self.emit(item_id, UpdateLocal(item.credential, item.etag))
-        elif local_changed and not remote_changed:
+        elif not remote_changed:
             self.emit(item_id, UpdateRemote(loc, item.etag))
-        elif rkey == lkey:
+        else:
+            self.both_changed(item_id, item, loc, local_wins=restored)
+
+    def both_changed(
+        self, item_id: str, item: RemoteItem, loc: Credential, *, local_wins: bool
+    ) -> None:
+        """Resolve an edit on both sides; `local_wins` overrides the newer-wins rule."""
+        if content_key(item.credential) == content_key(loc):
             self.emit(item_id, SetBase(item.credential, item.etag))
-        elif loc.modified > item.credential.modified:
+        elif local_wins or loc.modified > item.credential.modified:
             self.emit(item_id, Trash(item.credential, "conflict"), UpdateRemote(loc, item.etag))
         else:
             # Ties go to iCloud: it is the copy every other device already sees.
@@ -468,15 +495,18 @@ def plan(  # noqa: PLR0913 - the pause state is part of what decides deletions
     *,
     decision: PauseDecision | None = None,
     held: PendingDeletions | None = None,
+    restored: frozenset[str] = frozenset(),
 ) -> SyncPlan:
     """Decide every action for one cycle (spec §5), holding mass deletions back.
 
     `held` is an unanswered earlier pause: those deletions stay held. `decision` carries the
     user's answer to a pause: approved deletions bypass the guard; restored ones become
-    re-creations from the side that still has the item.
+    re-creations from the side that still has the item. `restored` names keyring logins the
+    user restored from trash: each wins against an iCloud edit, whose version goes to trash.
     """
     planner = _Planner(base, remote.items, local.items, decision)
     planner.local_incomplete = bool(local.rejected)
+    planner.restored = restored
     linked: set[str] = set()
     for lid, rid in _link_pairs(base, remote.items, local.items):
         planner.link(lid, rid)
