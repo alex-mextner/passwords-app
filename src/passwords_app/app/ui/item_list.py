@@ -342,13 +342,29 @@ class ItemListPage(Adw.NavigationPage):
         self._update_stack()
 
     def _refresh_trash(self) -> None:
+        """Replace the visible entries, keeping the selected entry selected when it stays."""
         query = self.query
         entries = [
             cast("TrashObject", self.vault.trash.get_item(i))
             for i in range(self.vault.trash.get_n_items())
         ]
         shown = entries if query.empty else [e for e in entries if query.matches(e.hay)]
-        self.trash_filtered.splice(0, self.trash_filtered.get_n_items(), shown)
+        selected = self.selected_trash()
+        selected_id = selected.entry.trash_id if selected is not None else None
+        self._splicing = True
+        try:
+            self.trash_filtered.splice(0, self.trash_filtered.get_n_items(), shown)
+            position = Gtk.INVALID_LIST_POSITION
+            if selected_id is not None:
+                position = next(
+                    (i for i, o in enumerate(shown) if o.entry.trash_id == selected_id), position
+                )
+            self.trash_selection.set_selected(position)
+        finally:
+            self._splicing = False
+        if selected_id is not None and position == Gtk.INVALID_LIST_POSITION:
+            # Purged, restored or filtered out: its detail must not offer a dead Restore.
+            self.emit("trash-selected")
         self._update_stack()
 
     def set_query(self, text: str) -> None:
@@ -499,7 +515,8 @@ class ItemListPage(Adw.NavigationPage):
             self.emit("item-selected")
 
     def _on_trash_selection(self, *_args: object) -> None:
-        self.emit("trash-selected")
+        if not self._splicing:
+            self.emit("trash-selected")
 
     def _on_activate(self, view: Gtk.ListView, position: int) -> None:
         model = cast("Gtk.SingleSelection", view.get_model())

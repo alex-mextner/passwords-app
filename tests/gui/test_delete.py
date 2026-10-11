@@ -176,3 +176,36 @@ def test_a_new_window_shows_the_loaded_trash_and_groups(app: support.AppUnderTes
     finally:
         window.destroy()
         support.pump(0.1)
+
+
+def test_an_entry_purged_after_90_days_leaves_the_deleted_view(app: support.AppUnderTest) -> None:
+    # The daemon's retention purge announces itself only through StatusChanged (#69).
+    from passwords_app.app import sections  # noqa: PLC0415
+
+    app.wait_loaded()
+    page = app.window.list_page
+    before = page.trash_filtered.get_n_items()
+    oldest = _open_trash_entry(app, before - 1)  # newest first: the last one expires first
+    kept = _open_trash_entry(app, 0)
+    page.trash_selection.set_selected(before - 1)
+    assert app.window.detail.entry == oldest
+    app.call(lambda d: d.expire_trash(oldest.trash_id))
+    support.wait_until(
+        lambda: page.trash_filtered.get_n_items() == before - 1, what="entry gone from Deleted"
+    )
+    shown = [page.trash_filtered.get_item(i).entry.trash_id for i in range(before - 1)]
+    assert oldest.trash_id not in shown
+    assert app.window.sidebar.rows[sections.DELETED].shown_count == str(before - 1)
+    # Its detail goes too: Restore would only fail with "No deleted password with this id."
+    assert _detail_entry(app) is None
+    assert page.selected_trash() is None
+    # Another selected entry stays selected through the reload.
+    page.trash_selection.set_selected(0)
+    app.call(lambda d: d.expire_trash(page.trash_filtered.get_item(before - 2).entry.trash_id))
+    support.wait_until(lambda: page.trash_filtered.get_n_items() == before - 2, what="reload")
+    assert page.selected_trash().entry.trash_id == kept.trash_id
+    assert _detail_entry(app).trash_id == kept.trash_id
+
+
+def _detail_entry(app: support.AppUnderTest) -> Any:
+    return app.window.detail.entry
