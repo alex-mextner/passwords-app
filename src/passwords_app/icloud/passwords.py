@@ -27,10 +27,11 @@ from datetime import UTC, datetime
 from typing import TYPE_CHECKING, cast
 
 from passwords_app.core.model import Credential
+from passwords_app.core.urls import site_key, url_domain
 from passwords_app.icloud.values import PLIST_ERRORS
 
 if TYPE_CHECKING:
-    from collections.abc import Callable, Iterable, Mapping
+    from collections.abc import Callable, Iterable, Mapping, Sequence
 
 AGRP_LOGIN = "com.apple.cfnetwork"
 AGRP_SIDECAR = "com.apple.password-manager"
@@ -384,6 +385,134 @@ def _modified(login: Login, created: datetime) -> datetime:
     return modified
 
 
+# --- one login on several websites -----------------------------------------------------------
+# Apple keeps a login used on several websites of one domain as one record per website, all
+# with the same account and password, and the Passwords app shows them as one entry. Read
+# one by one they would be separate logins, each with a "reused password" warning.
+
+
+def _age(login: Login) -> tuple[datetime, str]:
+    return _aware(login.item.attrs.get("cdat")) or _APPLE_EPOCH, login.record_name
+
+
+def _domain(attrs: Mapping[str, object]) -> str | None:
+    url = url_of(attrs)
+    return url_domain(url) if url is not None else None
+
+
+class _Groups:
+    """Union-find over record positions; a group's root is its oldest record."""
+
+    def __init__(self, size: int) -> None:
+        self._parent = list(range(size))
+
+    def root(self, i: int) -> int:
+        parent = self._parent
+        while parent[i] != i:
+            parent[i] = parent[parent[i]]
+            i = parent[i]
+        return i
+
+    def join(self, i: int, j: int) -> None:
+        a, b = self.root(i), self.root(j)
+        self._parent[max(a, b)] = min(a, b)
+
+
+def _same_account_and_password(order: Sequence[Login]) -> list[list[tuple[int, str]]]:
+    """(position, domain) of website records sharing account and password, two or more."""
+    buckets: dict[tuple[str, bytes], list[tuple[int, str]]] = {}
+    for i, login in enumerate(order):
+        password, domain = login.item.attrs.get("v_Data"), _domain(login.item.attrs)
+        if isinstance(password, bytes) and password and domain is not None:
+            key = (_text(login.item.attrs, "acct"), password)
+            buckets.setdefault(key, []).append((i, domain))
+    return [members for members in buckets.values() if len(members) > 1]
+
+
+def group_logins(logins: Iterable[Login]) -> list[tuple[Login, ...]]:
+    """Group the records Apple shows as one login, each group oldest record first.
+
+    Records join when they share account and password and either sit on one registrable
+    domain or one lists the other's domain among its alternate sites, unless two of them
+    hold different titles, notes or one-time codes. The oldest record (creation time, then
+    record name) names the login, so its id stays put when Apple adds a website. Raises
+    `UnreadableLoginError` for metadata that does not parse.
+    """
+    order = sorted(logins, key=_age)
+    groups = _Groups(len(order))
+    for members in _same_account_and_password(order):
+        by_domain: dict[str, int] = {}
+        for i, domain in members:
+            groups.join(by_domain.setdefault(domain, i), i)
+        for i, _ in members:
+            for site in _alt_sites(sidecar_payload(order[i].sidecar)):
+                if (other := by_domain.get(url_domain(site))) is not None:
+                    groups.join(i, other)
+    found: dict[int, list[Login]] = {}
+    for i, login in enumerate(order):
+        found.setdefault(groups.root(i), []).append(login)
+    out: list[tuple[Login, ...]] = []
+    for group in found.values():
+        if _metadata_agrees(group):
+            out.append(tuple(group))
+        else:  # one entry would show one record's title or notes for another's
+            out.extend((login,) for login in group)
+    return out
+
+
+def _metadata_agrees(group: Sequence[Login]) -> bool:
+    """Whether no two records of `group` hold different titles, notes or one-time codes."""
+    if len(group) == 1:
+        return True
+    payloads = [sidecar_payload(login.sidecar) for login in group]
+    return all(
+        len({repr(p[key]) for p in payloads if p.get(key)}) <= 1
+        for key in ("title", "notes", "totp")
+    )
+
+
+def group_credential(group: Sequence[Login]) -> Credential | None:
+    """Return the one `Credential` a group from `group_logins` describes (see `to_credential`).
+
+    Its id and url are the first record's; the other records' websites and every record's
+    alternate sites are its alternate sites, and each metadata field comes from the first
+    record that has it.
+    """
+    first = to_credential(group[0])
+    if first is None or len(group) == 1:
+        return first
+    rest = [c for c in map(to_credential, group[1:]) if c is not None]
+    sites = _distinct_sites(
+        [*(c.url for c in rest), *first.alt_urls, *(site for c in rest for site in c.alt_urls)]
+    )
+    sites.pop(site_key(first.url), None)
+    title, notes, otpauth = _first_metadata((first, *rest))
+    return dataclasses.replace(
+        first,
+        alt_urls=tuple(sites.values()),
+        modified=max(c.modified for c in (first, *rest)),
+        title=title,
+        notes=notes,
+        otpauth=otpauth,
+    )
+
+
+def _first_metadata(creds: Sequence[Credential]) -> tuple[str | None, str | None, str | None]:
+    """Return the title, notes and one-time code, each from the first credential with one."""
+    title = notes = otpauth = None
+    for cred in reversed(creds):
+        title, notes, otpauth = cred.title or title, cred.notes or notes, cred.otpauth or otpauth
+    return title, notes, otpauth
+
+
+def _distinct_sites(sites: Iterable[str]) -> dict[str, str]:
+    """Return the first spelling of each website (see `site_key`), by its key, in order."""
+    out: dict[str, str] = {}
+    for site in sites:
+        out.setdefault(site_key(site), site)
+    return out
+
+
 # --- writing ---------------------------------------------------------------------------------
 
 
@@ -635,3 +764,131 @@ def moved_login(login: Login, now: datetime, *, deleted: bool) -> Login:
 
     side = move(login.sidecar, sidecar_group) if login.sidecar is not None else None
     return Login(move(login.item, login_group), side)
+
+
+@dataclasses.dataclass(frozen=True, slots=True)
+class GroupSave:
+    """What every record of a login on several websites becomes when it is saved."""
+
+    records: tuple[tuple[Login, LoginAttributes], ...]  # in the group's order
+    dropped: frozenset[str]  # record names moved to Recently Deleted
+
+
+def updated_group(group: Sequence[Login], cred: Credential, now: datetime) -> GroupSave:
+    """Rewrite a group from `group_logins` to `cred`, never adding a record.
+
+    The first record takes `cred.url`. Every other record keeps its own website while `cred`
+    lists it and moves to Recently Deleted otherwise, or when the first record takes over its
+    website. Alternate sites stay with the record that lists them while `cred` keeps them, so
+    a group joined through them stays joined; a new website becomes an alternate site of the
+    first record. A record's title, notes or one-time code is replaced by `cred`'s, so the
+    group reads back as `cred`.
+    """
+    first = group[0]
+    kept = _kept_records(group, cred)
+    alt = _alt_sites_by_record((first, *kept), cred)
+    live = {login.record_name for login in (first, *kept)}
+    records: list[tuple[Login, LoginAttributes]] = []
+    for login in group:
+        if login.record_name in live:
+            target = _record_target(login, cred, alt[login.record_name], first=login is first)
+            records.append((login, updated_login(login, target, now)))
+        else:
+            moved = moved_login(login, now, deleted=True)
+            side = moved.sidecar.attrs if moved.sidecar is not None else None
+            records.append((login, LoginAttributes(moved.item.attrs, side)))
+    dropped = frozenset(login.record_name for login in group) - live
+    return GroupSave(tuple(records), dropped)
+
+
+def _record_site(login: Login) -> str:
+    return site_key(url_of(login.item.attrs) or "")
+
+
+def _kept_records(group: Sequence[Login], cred: Credential) -> list[Login]:
+    """Return the records after the first that keep their website (see `updated_group`)."""
+    wanted = {site_key(site) for site in (cred.url, *cred.alt_urls)}
+    main = site_key(cred.url)
+    taken = main if _record_site(group[0]) != main else None
+    return [
+        login
+        for login in group[1:]
+        if _record_site(login) in wanted and _record_site(login) != taken
+    ]
+
+
+def _alt_sites_by_record(live: Sequence[Login], cred: Credential) -> dict[str, list[str]]:
+    """Each live record's alternate sites; websites no record holds go to the first one."""
+    wanted = {site_key(site) for site in (cred.url, *cred.alt_urls)}
+    alt = {
+        login.record_name: [
+            site for site in _alt_sites(sidecar_payload(login.sidecar)) if site_key(site) in wanted
+        ]
+        for login in live
+    }
+    first = alt[live[0].record_name]
+    first.extend(_unlinked_sites(live, cred, alt))
+    covered = {site_key(cred.url), *(_record_site(login) for login in live[1:])}
+    covered.update(site_key(site) for sites in alt.values() for site in sites)
+    for key, site in _distinct_sites(cred.alt_urls).items():
+        if key not in covered:
+            first.append(site)
+    return alt
+
+
+def _unlinked_sites(
+    live: Sequence[Login], cred: Credential, alt: Mapping[str, list[str]]
+) -> list[str]:
+    """Websites the first record must list so every live record still joins it.
+
+    `group_logins` joins records on one domain, and a record to one whose domain it lists
+    among its alternate sites. Records the saved group would not reach that way from the
+    first one (on `cred.url`'s domain) get their website added to its alternate sites.
+    """
+    reached = {url_domain(cred.url)}  # domains of records joined to the first one
+    listed = {url_domain(site) for site in alt[live[0].record_name]}
+    pending = {
+        login.record_name: (domain, url)
+        for login in live[1:]
+        if (domain := _domain(login.item.attrs)) and (url := url_of(login.item.attrs))
+    }
+    out: list[str] = []
+    while pending:
+        name = _joining(pending, alt, reached, listed)
+        if name is None:  # bridge the oldest stray record through the first one
+            name = next(iter(pending))
+            out.append(pending[name][1])
+        reached.add(pending.pop(name)[0])
+        listed.update(url_domain(site) for site in alt[name])
+    return out
+
+
+def _joining(
+    pending: Mapping[str, tuple[str, str]],
+    alt: Mapping[str, list[str]],
+    reached: set[str],
+    listed: set[str],
+) -> str | None:
+    """Return a pending record `group_logins` joins to one already reached, if any."""
+    for name, (domain, _) in pending.items():
+        own = {url_domain(site) for site in alt[name]}
+        if domain in reached or domain in listed or own & reached:
+            return name
+    return None
+
+
+def _record_target(login: Login, cred: Credential, alt: list[str], *, first: bool) -> Credential:
+    """Return what one live record of the group is saved as."""
+    target = dataclasses.replace(cred, alt_urls=tuple(alt))
+    if first:
+        return target
+    # Another record keeps its id and website, and only the metadata it already has.
+    current = to_credential(login)
+    return dataclasses.replace(
+        target,
+        id=login.record_name,
+        url=url_of(login.item.attrs) or cred.url,
+        title=cred.title if current and current.title else None,
+        notes=cred.notes if current and current.notes else None,
+        otpauth=cred.otpauth if current and current.otpauth else None,
+    )

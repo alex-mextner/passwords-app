@@ -12,6 +12,8 @@ from typing import TYPE_CHECKING
 
 from zxcvbn import zxcvbn
 
+from passwords_app.core.urls import url_domain
+
 if TYPE_CHECKING:
     from collections.abc import Iterable, Sequence
 
@@ -47,14 +49,18 @@ def assess(password: str, *, user_inputs: Sequence[str] = ()) -> Strength:
 
 
 def reused(creds: Iterable[Credential]) -> dict[str, list[str]]:
-    """Group credentials that share a non-empty password.
+    """Group credentials whose non-empty password serves more than one domain.
 
+    As Apple marks it: the same password for several logins of one domain (an account on
+    `example.com` and `login.example.com`, or two accounts on one site) is not reuse.
     Keys are SHA-256 hex digests of the password, never the password, because the result is
-    shown in the UI and may be logged. Values are the sorted distinct credential ids; only
-    passwords used by at least two credentials are included.
+    shown in the UI and may be logged. Values are the sorted distinct credential ids.
     """
     groups: defaultdict[str, set[str]] = defaultdict(set)
+    domains: defaultdict[str, set[str]] = defaultdict(set)
     for c in creds:
         if c.password:
-            groups[hashlib.sha256(c.password.encode()).hexdigest()].add(c.id)
-    return {key: sorted(ids) for key, ids in groups.items() if len(ids) > 1}
+            key = hashlib.sha256(c.password.encode()).hexdigest()
+            groups[key].add(c.id)
+            domains[key].add(url_domain(c.url))
+    return {key: sorted(ids) for key, ids in groups.items() if len(domains[key]) > 1}

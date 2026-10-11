@@ -59,6 +59,10 @@ class RemoteItem:
 @dataclass(frozen=True, slots=True)
 class RemoteSnapshot:
     items: Mapping[str, RemoteItem]
+    # Ids of records that read as part of another login, mapped to that login's id: Apple
+    # keeps a login used on several websites as one record per website. Such an id missing
+    # from `items` is no deletion; its websites live on in the login it maps to.
+    merged: Mapping[str, str] = field(default_factory=dict[str, str])
 
 
 @dataclass(frozen=True, slots=True)

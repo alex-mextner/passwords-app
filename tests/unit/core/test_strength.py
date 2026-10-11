@@ -16,9 +16,14 @@ from passwords_app.core.strength import Strength, assess, reused
 _T = datetime(2026, 1, 1, tzinfo=UTC)
 
 
-def _cred(cid: str, password: str) -> Credential:
+def _cred(cid: str, password: str, url: str = "") -> Credential:
     return Credential(
-        id=cid, url="https://example.com", username="u", password=password, created=_T, modified=_T
+        id=cid,
+        url=url or f"https://{cid}-site.com",
+        username="u",
+        password=password,
+        created=_T,
+        modified=_T,
     )
 
 
@@ -185,3 +190,23 @@ def test_reused_key_never_contains_password() -> None:
 def test_reused_duplicate_id_counted_once() -> None:
     # The same credential observed twice (e.g. from two listings) is not "reuse".
     assert reused([_cred("a", "dup"), _cred("a", "dup")]) == {}
+
+
+def test_reused_only_across_different_domains() -> None:
+    """As Apple marks it: a password is reused when it serves more than one domain."""
+    creds = [
+        _cred("a", "shared", "https://example.com"),
+        _cred("b", "shared", "https://login.example.com"),
+        _cred("c", "other", "https://example.com"),
+        _cred("d", "other", "https://example.org"),
+    ]
+    assert reused(creds) == {_key("other"): ["c", "d"]}
+
+
+def test_reused_counts_every_login_once_another_domain_shares_it() -> None:
+    creds = [
+        _cred("a", "shared", "https://example.com"),
+        _cred("b", "shared", "https://www.example.com"),
+        _cred("c", "shared", "https://example.org"),
+    ]
+    assert reused(creds) == {_key("shared"): ["a", "b", "c"]}
