@@ -35,7 +35,9 @@ Homepage = "https://github.com/alex-mextner/passwords-app"
 Issues = "https://github.com/alex-mextner/passwords-app/issues"
 
 [project.scripts]
-passwords-app = "passwords_app.icloud.cli.app:main"
+passwords-app = "passwords_app.cli.main:main"
+passwords-appd = "passwords_app.daemon.main:main"
+passwords-app-native-host = "passwords_app.browser.native_host:main"
 
 [dependency-groups]
 dev = [
