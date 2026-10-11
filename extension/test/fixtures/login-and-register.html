@@ -1,0 +1,25 @@
+<!doctype html>
+<html lang="en">
+<head><meta charset="utf-8"><title>Account · Wide World Importers</title></head>
+<body>
+<div class="columns">
+  <section>
+    <h2>Returning customers</h2>
+    <form id="lf" action="/account/login" method="post">
+      <label for="l-email">Email</label><input id="l-email" type="email" name="email">
+      <label for="l-pass">Password</label><input id="l-pass" type="password" name="password">
+      <button type="submit">Sign in</button>
+    </form>
+  </section>
+  <section>
+    <h2>New customers</h2>
+    <form id="rf" action="/account/register" method="post">
+      <label for="r-name">Full name</label><input id="r-name" name="name">
+      <label for="r-email">Email</label><input id="r-email" type="email" name="email">
+      <label for="r-pass">Password</label><input id="r-pass" type="password" name="password" autocomplete="new-password">
+      <button type="submit">Register</button>
+    </form>
+  </section>
+</div>
+</body>
+</html>

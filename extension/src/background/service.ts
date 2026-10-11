@@ -123,6 +123,8 @@ export class Background {
   private readonly capturing = new Map<number, Promise<CapturedReply>>();
   /** The newest capture per tab; an older one finishing later must not replace its prompt. */
   private readonly latestCapture = new Map<number, symbol>();
+  /** Tail of the queued updates of the never-save list. */
+  private neverSaveUpdate: Promise<void> = Promise.resolve();
 
   constructor(
     private readonly host: Host,
@@ -347,10 +349,17 @@ export class Background {
     if (pending?.captureId !== captureId) return false;
     await this.browser.session.remove(this.pendingKey(sender.tabId));
     if (answer === "never") {
-      const origins = await this.neverSave();
-      if (!origins.includes(pending.origin)) {
-        await this.browser.local.set(NEVER_SAVE_KEY, [...origins, pending.origin]);
-      }
+      const { origin } = pending;
+      // Read-modify-write of one list: concurrent "Never" answers from two tabs must queue,
+      // or the later write drops the earlier origin.
+      const update = this.neverSaveUpdate.then(async () => {
+        const origins = await this.neverSave();
+        if (!origins.includes(origin)) {
+          await this.browser.local.set(NEVER_SAVE_KEY, [...origins, origin]);
+        }
+      });
+      this.neverSaveUpdate = update.catch(() => undefined);
+      await update;
       return false;
     }
     if (answer === "not-now") return false;

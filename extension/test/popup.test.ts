@@ -99,6 +99,8 @@ describe("statusLine", () => {
     ["signed-out", null, "warn"],
     ["signin-required", null, "warn"],
     ["error", null, "error"],
+    // Status answered but matching failed: never a healthy-looking line.
+    ["idle", "internal", "error"],
   ] as const)("state %s, error %s → %s", (s, error, tone) => {
     const line = statusLine(s, error);
     expect(line.tone).toBe(tone);

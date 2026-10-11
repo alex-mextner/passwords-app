@@ -1,0 +1,7 @@
+# Fake credentials used by test fixtures; none are real secrets.
+[extend]
+useDefault = true
+
+[allowlist]
+description = "Synthetic test passwords"
+regexes = ['''abcdef-ghijkm-npqrs7''']

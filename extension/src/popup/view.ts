@@ -53,7 +53,8 @@ export function statusLine(
   }
   if (error === "locked") return { text: t("locked"), tone: "warn" };
   if (error === "auth-required") return { text: t("stateSignedOut"), tone: "warn" };
-  if (state === null) return { text: t("genericError"), tone: "error" };
+  // Any other failure (status answered, matching failed) must not read as healthy.
+  if (state === null || error !== null) return { text: t("genericError"), tone: "error" };
   const tone: StatusTone =
     state === "idle" ? "ok" : state === "syncing" ? "busy" : state === "error" ? "error" : "warn";
   return { text: t(STATE_TEXT[state]), tone };

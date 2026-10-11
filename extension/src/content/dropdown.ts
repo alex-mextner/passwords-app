@@ -211,7 +211,8 @@ export class Dropdown {
         this.highlight(this.rowElements.length - 1);
         return true;
       case "Enter":
-        if (!this.isTrusted(event)) return false;
+        // Enter that confirms an IME composition belongs to the input method.
+        if (!this.isTrusted(event) || event.isComposing) return false;
         this.pick(this.active);
         return true;
       case "Escape":
@@ -237,10 +238,19 @@ export class Dropdown {
         event.stopImmediatePropagation();
       }
     };
+    // Scroll fires per scroller and per frame; one layout read/write per animation frame.
+    let frame: number | null = null;
     const onReposition = (): void => {
-      if (!this.anchor.isConnected) this.close();
-      else this.position();
+      if (frame !== null || view === null) return;
+      frame = view.requestAnimationFrame(() => {
+        frame = null;
+        if (!this.anchor.isConnected) this.close();
+        else if (!this.closed) this.position();
+      });
     };
+    this.cleanups.push(() => {
+      if (frame !== null) view?.cancelAnimationFrame(frame);
+    });
     const onPointer = (event: Event): void => {
       const path = event.composedPath();
       if (!path.includes(this.overlay.host) && !path.includes(this.anchor)) this.close();

@@ -1,0 +1,24 @@
+<!doctype html>
+<html lang="en">
+<head><meta charset="utf-8"><title>Checkout · Fourth Coffee</title></head>
+<body>
+<main>
+  <h1>Payment</h1>
+  <form id="pay" action="/checkout/pay" method="post">
+    <label for="ccname">Name on card</label><input id="ccname" autocomplete="cc-name">
+    <label for="ccnum">Card number</label><input id="ccnum" autocomplete="cc-number" inputmode="numeric">
+    <label for="ccexp">Expiry (MM/YY)</label><input id="ccexp" autocomplete="cc-exp" maxlength="5">
+    <label for="cvc">CVC</label><input id="cvc" type="password" autocomplete="cc-csc" maxlength="4">
+    <label for="zip">ZIP</label><input id="zip" autocomplete="billing postal-code">
+    <button type="submit">Pay $42.00</button>
+  </form>
+  <form id="legacy-pay" action="/checkout/legacy" method="post">
+    <label for="card_number">Card number</label><input id="card_number" name="card_number">
+    <label for="exp_month">Month</label><input id="exp_month" name="exp_month" maxlength="2" inputmode="numeric">
+    <label for="exp_year">Year</label><input id="exp_year" name="exp_year" maxlength="2" inputmode="numeric">
+    <label for="cvv">Security code</label><input id="cvv" name="cvv" type="password" maxlength="4">
+    <input type="submit" value="Place order">
+  </form>
+</main>
+</body>
+</html>

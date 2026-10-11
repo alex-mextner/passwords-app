@@ -237,14 +237,19 @@ class ContentScript {
 
   // ------------------------------------------------------------------ popup commands
 
+  private focusedForm(): LoginForm | null {
+    const focused = deepActiveElement(this.doc);
+    return focused instanceof HTMLInputElement ? (this.locate(focused)?.form ?? null) : null;
+  }
+
+  /** Where a saved login goes: the focused form when it has login fields, else the first. */
   private bestForm(): LoginForm | null {
     this.rescan();
-    const focused = deepActiveElement(this.doc);
-    if (focused instanceof HTMLInputElement) {
-      const located = this.locate(focused);
-      if (located !== null) return located.form;
-    }
-    return this.forms.find((f) => f.password !== null || f.username !== null) ?? null;
+    const fillable = (f: LoginForm): boolean => f.password !== null || f.username !== null;
+    const focused = this.focusedForm();
+    if (focused !== null && fillable(focused)) return focused;
+    // A sign-up form (new-password fields only) has nothing a saved login can fill.
+    return this.forms.find(fillable) ?? null;
   }
 
   private onCommand(message: unknown): unknown {
@@ -256,8 +261,10 @@ class ContentScript {
     if (command.origin !== location.origin) return false;
     if (command.type === "apply-code") {
       this.rescan();
-      const group = this.forms.find((f) => f.otp !== null)?.otp;
-      if (group === undefined || group === null) return false;
+      // The focused form's code boxes first, else the page's only/first code field.
+      const group =
+        this.focusedForm()?.otp ?? this.forms.find((f) => f.otp !== null)?.otp ?? null;
+      if (group === null) return false;
       fillOtp(group, command.code);
       return true;
     }

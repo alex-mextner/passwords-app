@@ -1,0 +1,19 @@
+<!doctype html>
+<html lang="en">
+<head><meta charset="utf-8"><title>Login code · Wingtip</title></head>
+<body>
+<form id="sep" action="/login/code" method="post">
+  <h2>Enter login code</h2>
+  <div class="otp">
+    <div class="group">
+      <input id="s1" type="text" pattern="[0-9]*" maxlength="1"><input id="s2" type="text" pattern="[0-9]*" maxlength="1"><input id="s3" type="text" pattern="[0-9]*" maxlength="1">
+    </div>
+    <span class="dash" aria-hidden="true">–</span>
+    <div class="group">
+      <input id="s4" type="text" pattern="[0-9]*" maxlength="1"><input id="s5" type="text" pattern="[0-9]*" maxlength="1"><input id="s6" type="text" pattern="[0-9]*" maxlength="1">
+    </div>
+  </div>
+  <button type="submit">Log in</button>
+</form>
+</body>
+</html>
