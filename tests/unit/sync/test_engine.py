@@ -4,6 +4,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import dataclasses
 from datetime import UTC, datetime, timedelta
 from typing import TYPE_CHECKING, Any
@@ -481,8 +482,10 @@ async def test_restore_keeps_the_displaced_version_when_a_failed_write_landed(
     entry_id, live = await _restore_twin_scenario(w)
     write = w.local.upsert
 
-    async def write_then_lose_the_reply(credential: Credential) -> None:
-        await write(credential)
+    async def write_then_lose_the_reply(
+        credential: Credential, *, expected: str | None = None
+    ) -> None:
+        await write(credential, expected=expected)
         msg = "reply lost"
         raise LocalUnavailable(msg)
 
@@ -1229,3 +1232,122 @@ async def test_rejected_keyring_item_never_causes_an_icloud_delete(w: World) -> 
     assert report.deleted_remote == 0
     assert "A" in w.remote.items
     assert "A" in w.state.bases()
+
+
+# ---------------------------------------------------------------- conditional keyring writes
+
+
+async def test_a_keyring_edit_made_during_the_write_phase_is_not_overwritten(w: World) -> None:
+    # #17: the keyring write is conditional on the version the plan was made from, so a
+    # Seahorse edit landing between the read and the write wins the next cycle's conflict.
+    a = make_credential("A")
+    await synced(w, a)
+    w.remote.put(at(a, 1, password="fake-iphone"))
+
+    async def user_edits_in_seahorse(_: str) -> None:
+        w.local.on_write = None
+        w.local.put(at(a, 2, password="fake-typed-meanwhile"))
+
+    w.local.on_write = user_edits_in_seahorse
+    report = await w.engine.run_once()
+    assert report.skipped_reason is None
+    assert w.local.items["A"].password == "fake-typed-meanwhile"
+    await w.engine.run_once()
+    assert w.remote.items["A"].credential.password == "fake-typed-meanwhile"
+    assert [e.credential.password for e in w.engine.trash()] == ["fake-iphone"]
+    assert w.converged()
+
+
+async def test_a_keyring_edit_made_during_the_write_phase_survives_an_icloud_delete(
+    w: World,
+) -> None:
+    a = make_credential("A")
+    await synced(w, a)
+    w.remote.remove("A")
+
+    async def user_edits_in_seahorse(_: str) -> None:
+        w.local.on_write = None
+        w.local.put(at(a, 2, password="fake-typed-meanwhile"))
+
+    w.local.on_write = user_edits_in_seahorse
+    await w.engine.run_once()
+    assert w.local.items["A"].password == "fake-typed-meanwhile"
+    await w.engine.run_once()
+    assert w.remote.items["A"].credential.password == "fake-typed-meanwhile"
+    assert w.converged()
+
+
+async def test_a_lost_keyring_race_does_not_stop_the_other_items(w: World) -> None:
+    a, b = make_credential("A"), make_credential("B")
+    await synced(w, a, b)
+    w.remote.put(at(a, 1, password="fake-iphone-a"))
+    w.remote.put(at(b, 1, password="fake-iphone-b"))
+
+    async def user_edits_a(item_id: str) -> None:
+        if item_id == "A":
+            w.local.put(at(a, 2, password="fake-typed-meanwhile"))
+
+    w.local.on_write = user_edits_a
+    report = await w.engine.run_once()
+    assert report.skipped_reason is None
+    assert report.updated_local == 1
+    assert w.local.items["B"].password == "fake-iphone-b"
+    assert w.local.items["A"].password == "fake-typed-meanwhile"
+
+
+# ---------------------------------------------------------------- restore races
+
+
+async def test_restoring_a_version_equal_to_its_twin_beats_a_pending_icloud_edit(
+    w: World,
+) -> None:
+    # #84: restoring is the user's explicit choice, so it wins over an iCloud edit not yet
+    # synced, and that edit goes to trash instead of silently replacing the restored version.
+    a = make_credential("A", password="fake-a")
+    await synced(w, a)
+    w.state.add_trash(TrashEntry("T", a, T0, "conflict"))
+    w.remote.put(at(a, 1, password="fake-iphone"))
+    w.clock.advance(hours=1)
+    assert await w.engine.restore("T") == "A"
+    report = await w.engine.run_once()
+    assert report.skipped_reason is None
+    assert w.local.items["A"].password == "fake-a"
+    assert w.remote.items["A"].credential.password == "fake-a"
+    assert [e.credential.password for e in w.engine.trash()] == ["fake-iphone"]
+    assert w.converged()
+    # The restore was settled by that cycle: a later iPhone edit syncs normally.
+    w.remote.put(at(a, 3, password="fake-iphone-later"))
+    await w.engine.run_once()
+    assert w.local.items["A"].password == "fake-iphone-later"
+
+
+async def test_a_restore_kept_through_a_lost_icloud_race_still_wins_next_cycle(
+    w: World,
+) -> None:
+    a = make_credential("A", password="fake-a")
+    await synced(w, a)
+    w.state.add_trash(TrashEntry("T", a, T0, "conflict"))
+    w.remote.put(at(a, 1, password="fake-iphone"))
+    await w.engine.restore("T")
+    w.remote.fail_next("upsert", ConflictError("edited again on the iPhone"))
+    await w.engine.run_once()
+    await w.engine.run_once()
+    assert w.remote.items["A"].credential.password == "fake-a"
+    assert w.local.items["A"].password == "fake-a"
+
+
+async def test_two_concurrent_restores_of_one_item_keep_both_versions(w: World) -> None:
+    # #79: both see the item's id free; the second must not overwrite the first.
+    first = make_credential("X", username="alice", password="fake-first")
+    second = make_credential("X", username="bob", password="fake-second")
+    w.state.add_trash(TrashEntry("T1", first, T0, "deleted-on-linux"))
+    w.state.add_trash(TrashEntry("T2", second, T0, "deleted-in-icloud"))
+
+    async def let_others_run(_: str) -> None:
+        await asyncio.sleep(0)
+
+    w.local.on_write = let_others_run
+    ids = await asyncio.gather(w.engine.restore("T1"), w.engine.restore("T2"))
+    assert len(set(ids)) == 2
+    assert sorted(w.local.items[i].password for i in ids) == ["fake-first", "fake-second"]
+    assert w.engine.trash() == []

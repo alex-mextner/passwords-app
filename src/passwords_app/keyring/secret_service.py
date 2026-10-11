@@ -46,7 +46,12 @@ from passwords_app.keyring.mapping import (
     needs_created,
     read_item,
 )
-from passwords_app.sync.ports import LocalSnapshot, LocalUnavailable, RejectedLocalItem
+from passwords_app.sync.ports import (
+    ConflictError,
+    LocalSnapshot,
+    LocalUnavailable,
+    RejectedLocalItem,
+)
 
 if TYPE_CHECKING:
     from collections.abc import AsyncIterator, Awaitable, Callable, Iterable
@@ -246,13 +251,58 @@ class SecretServiceStore:
     async def _find(self, item_id: str) -> list[str]:
         return await self._client.search(self._collection, {ID_ATTRIBUTE: item_id})
 
-    async def upsert(self, credential: Credential) -> None:
-        """Create or overwrite the item with this id (raises ValueError if unstorable)."""
+    async def _check_unchanged(
+        self, item_id: str, found: list[str], expected: str | None, *, missing_ok: bool
+    ) -> None:
+        """Raise `ConflictError` unless the item still has the content hash `expected`."""
+        if expected is None or (not found and missing_ok):
+            return
+        # The item a fetch would report for this id: the oldest of any duplicates.
+        current = await self._read_item(min(found, key=_creation_order)) if found else None
+        if current is None or current.content_hash() != expected:
+            msg = f"keyring item {item_id} changed since it was read"
+            raise ConflictError(msg)
+
+    async def _read_item(self, path: str) -> Credential | None:
+        """Read one item afresh; None when it can no longer become a Credential."""
+        client = self._client
+
+        async def read(item: str, name: str) -> Any:  # noqa: ANN401 - D-Bus property value
+            return await client.get_property(item, ITEM, name)
+
+        properties, secrets = await asyncio.gather(
+            _read_properties([path], read), client.get_secrets([path])
+        )
+        if path not in secrets:
+            msg = "a secret could not be read (collection locked meanwhile?)"
+            raise LocalUnavailable(msg)
+        p = properties[path]
+        stored = StoredItem(
+            ref=path,
+            label=p.label,
+            attributes=p.attributes,
+            secret=secrets[path],
+            created=p.created,
+            modified=p.modified,
+        )
+        try:
+            return read_item(stored, new_id=functools.partial(_adoption_id, stored)).credential
+        except ItemRejectedError:
+            return None
+
+    async def upsert(self, credential: Credential, *, expected: str | None = None) -> None:
+        """Create or overwrite the item with this id (raises ValueError if unstorable).
+
+        With `expected`, raises `ConflictError` instead when the item is gone or its content
+        hash differs (see `LocalStore.upsert`); the check and the write share the store's
+        lock, so only a writer in another process (Seahorse) can still slip in between.
+        """
         item_content(credential, written_at=0)  # refuse unstorable input before any I/O
         try:
             async with self._io:
                 await self._ready()
                 found = await self._find(credential.id)
+                await self._check_unchanged(credential.id, found, expected, missing_ok=False)
                 # Stamped right before the write: waiting for the lock or an unlock must
                 # not make our own write look like a later edit by someone else.
                 content = item_content(credential, written_at=int(time.time()))
@@ -274,12 +324,17 @@ class SecretServiceStore:
         except SecretServiceError as exc:
             raise LocalUnavailable(str(exc)) from exc
 
-    async def delete(self, item_id: str) -> None:
-        """Delete every item carrying this id; deleting a missing id is a no-op."""
+    async def delete(self, item_id: str, *, expected: str | None = None) -> None:
+        """Delete every item carrying this id; deleting a missing id is a no-op.
+
+        With `expected`, raises `ConflictError` instead when the item's content hash differs.
+        """
         try:
             async with self._io:
                 await self._ready()
-                for path in await self._find(item_id):
+                found = await self._find(item_id)
+                await self._check_unchanged(item_id, found, expected, missing_ok=True)
+                for path in found:
                     await self._client.delete_item(path)
         except SecretServiceError as exc:
             raise LocalUnavailable(str(exc)) from exc

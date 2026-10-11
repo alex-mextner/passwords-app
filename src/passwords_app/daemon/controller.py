@@ -49,7 +49,13 @@ from passwords_app.daemon.status import (
 )
 from passwords_app.sync.engine import LAST_SYNC_KEY, NoPendingDeletionsError, SyncEngine
 from passwords_app.sync.plan import content_key, trash_id
-from passwords_app.sync.ports import AuthRequired, LocalUnavailable, RemoteUnavailable, SyncPolicy
+from passwords_app.sync.ports import (
+    AuthRequired,
+    ConflictError,
+    LocalUnavailable,
+    RemoteUnavailable,
+    SyncPolicy,
+)
 
 if TYPE_CHECKING:
     from collections.abc import AsyncIterator, Callable, Mapping
@@ -171,20 +177,20 @@ class CachingLocal:
         msg = "the keyring kept locking and unlocking during the read"
         raise LocalUnavailable(msg)
 
-    async def upsert(self, credential: Credential) -> None:
+    async def upsert(self, credential: Credential, *, expected: str | None = None) -> None:
         # Before and after: a read starting while the write is under way may miss it.
         self.invalidate()
         try:
-            await self._inner.upsert(credential)
+            await self._inner.upsert(credential, expected=expected)
         finally:
             self.invalidate()
         if self._journal is not None:
             self._journal.upserted(credential)
 
-    async def delete(self, item_id: str) -> None:
+    async def delete(self, item_id: str, *, expected: str | None = None) -> None:
         self.invalidate()
         try:
-            await self._inner.delete(item_id)
+            await self._inner.delete(item_id, expected=expected)
         finally:
             self.invalidate()
         if self._journal is not None:
@@ -702,6 +708,9 @@ class Daemon:
                 raise NotFoundError(msg) from None
             except LocalUnavailable as exc:
                 raise LockedError(str(exc)) from exc
+            except ConflictError:
+                msg = "The password was changed while it was being restored. Try again."
+                raise UnavailableError(msg) from None
             await self._refresh()
         self.scheduler.local_changed()
         self._publish()

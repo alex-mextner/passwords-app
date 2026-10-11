@@ -37,7 +37,7 @@ class LocalUnavailable(SyncError):  # noqa: N818 - spec §5 contract name, used 
 
 
 class ConflictError(SyncError):
-    """A conditional write lost a race: the record changed since it was fetched."""
+    """A conditional write lost a race: the record or keyring item changed since it was read."""
 
 
 class ItemRejected(SyncError):  # noqa: N818 - named like the other store outcomes
@@ -51,7 +51,9 @@ class ItemRejected(SyncError):  # noqa: N818 - named like the other store outcom
 @dataclass(frozen=True, slots=True)
 class RemoteItem:
     credential: Credential
-    etag: str | None
+    # Every fetched record has a version: the engine updates it conditionally on this one,
+    # and with none to name, an update would be sent as a create that conflicts forever.
+    etag: str
 
 
 @dataclass(frozen=True, slots=True)
@@ -90,9 +92,21 @@ class RemoteStore(Protocol):
 class LocalStore(Protocol):
     async def fetch(self) -> LocalSnapshot: ...
 
-    async def upsert(self, credential: Credential) -> None: ...
+    async def upsert(self, credential: Credential, *, expected: str | None = None) -> None:
+        """Create or overwrite the item with `credential.id`.
 
-    async def delete(self, item_id: str) -> None: ...
+        With `expected` (the `content_hash()` the caller read), the item is re-read right
+        before the write and `ConflictError` is raised if it is gone or its content differs,
+        so an edit made since the read is never overwritten. None writes unconditionally.
+        """
+        ...
+
+    async def delete(self, item_id: str, *, expected: str | None = None) -> None:
+        """Delete the item; a missing item is a no-op.
+
+        With `expected`, `ConflictError` is raised instead if the item's content differs.
+        """
+        ...
 
     def changes(self) -> AsyncIterator[None]:
         """Yield once per external change notification (debouncing is the caller's job)."""

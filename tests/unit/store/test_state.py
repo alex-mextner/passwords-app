@@ -277,6 +277,16 @@ def test_add_trash_is_idempotent_per_trash_id(store: StateStore) -> None:
     assert [e.deleted_at for e in store.trash()] == [T0]
 
 
+def test_adding_the_same_trash_entry_later_restarts_its_retention(store: StateStore) -> None:
+    # #17: the same conflict lost again weeks later must be kept 90 days from then, not
+    # purged on the schedule of its first occurrence.
+    assert store.add_trash(entry("T1", days_ago=60)) is True
+    assert store.add_trash(entry("T1")) is False
+    assert [e.deleted_at for e in store.trash()] == [T0]
+    store.purge_older_than(T0 - timedelta(days=30))
+    assert store.get_trash("T1") is not None
+
+
 def test_trash_lists_newest_first(store: StateStore) -> None:
     for i, days in enumerate([5, 0, 89, 1]):
         store.add_trash(entry(f"T{i}", days_ago=days))

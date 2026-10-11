@@ -24,6 +24,11 @@ API summary (keep it small; daemon, app, browser, and e2e suites depend on it):
 - `lock()` / `unlock()` / `locked`: a locked collection raises `LocalUnavailable` on every
   call, exactly like the real adapter.
 - `fail_next(op, exc, times=1)` as above.
+- `upsert(c, expected=h)` / `delete(id, expected=h)`: like the real adapter, a write with an
+  expected content hash raises `ConflictError` when the item's current content differs (or
+  an upsert finds it gone); `expected=None` writes unconditionally.
+- `on_write`: optional async hook run inside `upsert`/`delete` before that check, to model
+  an edit made in Seahorse while the engine writes.
 - `changes()`: async iterator yielding once per mutation, including the engine's own writes
   (the real Secret Service signals those too; debouncing is the consumer's job).
 - `calls` as above.
@@ -186,6 +191,7 @@ class MemoryLocal:
         self.locked = False
         self.rejected: list[RejectedLocalItem] = []
         self.calls: list[tuple[Op, str | None]] = []
+        self.on_write: Callable[[str], Awaitable[None]] | None = None
 
     @property
     def items(self) -> Mapping[str, Credential]:
@@ -223,12 +229,26 @@ class MemoryLocal:
         self._enter("fetch", None)
         return LocalSnapshot(dict(self._items), tuple(self.rejected))
 
-    async def upsert(self, credential: Credential) -> None:
+    async def _check(self, item_id: str, expected: str | None, *, missing_ok: bool) -> None:
+        if self.on_write is not None:
+            await self.on_write(item_id)
+        if expected is None:
+            return
+        current = self._items.get(item_id)
+        if current is None and missing_ok:
+            return
+        if current is None or current.content_hash() != expected:
+            msg = f"keyring item {item_id} changed since it was read"
+            raise ConflictError(msg)
+
+    async def upsert(self, credential: Credential, *, expected: str | None = None) -> None:
         self._enter("upsert", credential.id)
+        await self._check(credential.id, expected, missing_ok=False)
         self.put(credential)
 
-    async def delete(self, item_id: str) -> None:
+    async def delete(self, item_id: str, *, expected: str | None = None) -> None:
         self._enter("delete", item_id)
+        await self._check(item_id, expected, missing_ok=True)
         # Deleting an already-missing item is a no-op, as with the Secret Service API.
         if item_id in self._items:
             self.remove(item_id)

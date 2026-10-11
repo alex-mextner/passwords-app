@@ -108,8 +108,9 @@ Guards (never bypassed silently):
 - A cycle that would delete more than `max(5, 10% of items)` on either side **pauses**: nothing
   is deleted, status = `paused`, banner in the app, notification; user chooses
   *Apply deletions* or *Restore them*.
-- Writes to iCloud are **conditional on the record etag** captured at fetch time; a conflict
-  error aborts that action and the next cycle re-plans with fresh data.
+- Writes to iCloud are **conditional on the record etag** captured at fetch time, and writes
+  to the keyring on the item's content as read at fetch time (re-read just before writing);
+  a conflict error aborts that action and the next cycle re-plans with fresh data.
 - A login iCloud refuses to store (another login has its site and username, or the address
   is not a website) only sets **that item** aside: the rest of the cycle continues, status is
   not `offline`, the status message names the login, a notification fires once per refused
@@ -122,9 +123,12 @@ purged. *Restore* re-inserts it locally; the next cycle pushes it to iCloud. iCl
 login per site and username, so when a live keyring login has the restored version's site and
 username (e.g. restoring a conflict loser), the restored version **replaces** that login in
 place and the displaced version goes to trash (reason `conflict`); Restore returns the live
-login's id. Otherwise a deleted item comes back under its own id while that id is free, so
-iCloud moves its record out of Recently Deleted instead of duplicating it; a conflict loser
-gets a fresh id.
+login's id. Restoring is the user's explicit choice: the restored login wins over an iCloud
+edit of it not synced yet (even when it equals the version both sides last agreed on), and
+that edit goes to trash. Otherwise a deleted item comes back under its own id while that id
+is free, so iCloud moves its record out of Recently Deleted instead of duplicating it; a
+conflict loser gets a fresh id. Restores and sync cycles run one at a time. A trash entry
+added again (the same version lost again) keeps its latest `deleted_at`.
 
 Scheduling: a cycle runs at start, every 60 s while the app or a browser is active and every
 5 min otherwise, 2 s after any local change (Secret Service `ItemCreated/Changed/Deleted`
@@ -227,8 +231,9 @@ class RemoteStore(Protocol):  # sync/ports.py
 
 class LocalStore(Protocol):  # sync/ports.py
     async def fetch(self) -> LocalSnapshot: ...  # LocalUnavailable if locked/missing
-    async def upsert(self, c: Credential) -> None: ...
-    async def delete(self, item_id: str) -> None: ...
+    async def upsert(self, c: Credential, *, expected: str | None = None) -> None: ...  # ConflictError
+    async def delete(self, item_id: str, *, expected: str | None = None) -> None: ...  # ConflictError
+    # `expected`: the content_hash() read at fetch time; None writes unconditionally
 
 
 def plan(
