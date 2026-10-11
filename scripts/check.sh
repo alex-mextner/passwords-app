@@ -34,7 +34,7 @@ declare -A GROUP_GATES=(
   [types]="mypy pyright"
   [security]="bandit semgrep pip-audit gitleaks"
   [data]="dbus-xml desktop-file appstream gschema"
-  [extension]="eslint tsc prettier web-ext bun-audit semgrep-ts"
+  [extension]="eslint tsc prettier web-ext bun-audit bun-test semgrep-ts"
   [unit]=unit
   [integration]=integration
   [coverage]=coverage
@@ -376,6 +376,17 @@ gate_bun-audit() {
   # node-forge via web-ext>adbkit: no fixed release; adbkit only parses ADB public keys, never
   # verifies signatures, and only for `web-ext run --target firefox-android` (unreachable here).
   run_gate bun-audit bun -- in_extension bun audit --ignore GHSA-86w9-cpqp-85rv
+}
+gate_bun-test() {
+  if [[ ! -f extension/package.json ]]; then
+    skip bun-test "no extension/"
+    return
+  fi
+  if ! ext_ready; then
+    record bun-test FAIL 0 "bun install failed"
+    return
+  fi
+  run_gate bun-test bun -- in_extension bun test
 }
 gate_semgrep-ts() {
   if [[ ! -f extension/package.json ]]; then
