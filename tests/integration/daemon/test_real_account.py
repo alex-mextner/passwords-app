@@ -18,7 +18,7 @@ from passwords_app.daemon.account import AccountInfo, ICloudAccount
 if TYPE_CHECKING:
     from pathlib import Path
 
-pytestmark = pytest.mark.integration
+pytestmark = [pytest.mark.integration, pytest.mark.timeout(60)]
 
 
 def test_load_wires_the_real_account(tmp_path: Path) -> None:

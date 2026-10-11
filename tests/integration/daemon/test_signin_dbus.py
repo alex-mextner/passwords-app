@@ -17,7 +17,7 @@ from passwords_app.daemon.errors import UnavailableError
 if TYPE_CHECKING:
     from dbus_fast import Variant
 
-pytestmark = pytest.mark.integration
+pytestmark = [pytest.mark.integration, pytest.mark.timeout(60)]
 
 ERR = f"{INTERFACE}.Error."
 

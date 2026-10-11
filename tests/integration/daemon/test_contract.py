@@ -19,7 +19,7 @@ from passwords_app.daemon import BUS_NAME, INTERFACE, OBJECT_PATH
 if TYPE_CHECKING:
     from dbus_fast.aio import MessageBus
 
-pytestmark = pytest.mark.integration
+pytestmark = [pytest.mark.integration, pytest.mark.timeout(60)]
 
 XML = Path(__file__).parents[3] / "data" / "dbus" / "io.github.alex_mextner.Passwords1.xml"
 ERR = f"{INTERFACE}.Error."
