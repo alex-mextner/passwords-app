@@ -4,7 +4,8 @@ build-backend = "hatchling.build"
 
 [project]
 name = "passwords-app"
-version = "0.3.2"
+ version = "0.3.4"
+ version = "0.3.4"
 description = "Two-way iCloud Keychain sync for Linux: GNOME Keyring, a native Passwords app, and browser autofill"
 readme = "README.md"
 license = "MIT"
