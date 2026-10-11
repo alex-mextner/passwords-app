@@ -17,8 +17,8 @@ from passwords_app.sync.plan import (
     CreateRemote,
     DeleteLocal,
     DeleteRemote,
-    ForkLocal,
     Link,
+    MergeLocal,
     Trash,
     UpdateLocal,
     UpdateRemote,
@@ -78,14 +78,13 @@ def test_a_changed_version_is_never_destroyed_without_a_trash_copy(
     base, remote, local = build(world)
     result = plan(base, remote, local, NO_GUARD)
     trashed = {content_key(a.credential) for a in result.actions if isinstance(a, Trash)}
-    forked = {content_key(a.credential) for a in result.actions if isinstance(a, ForkLocal)}
     for a in result.actions:
         b = base.get(a.item_id)
-        if isinstance(a, (UpdateLocal, DeleteLocal)):
+        if isinstance(a, (UpdateLocal, MergeLocal, DeleteLocal)):
             old = local.items.get(a.item_id)
-            new_key = content_key(a.credential) if isinstance(a, UpdateLocal) else None
+            new_key = None if isinstance(a, DeleteLocal) else content_key(a.credential)
             if changed(old, b) and old is not None and content_key(old) != new_key:
-                assert content_key(old) in trashed | forked or _copy_exists(old, local)
+                assert content_key(old) in trashed or _copy_exists(old, local)
         if isinstance(a, (UpdateRemote, DeleteRemote)):
             item = remote.items.get(a.item_id)
             old_r = item.credential if item else None
@@ -105,8 +104,13 @@ def test_deletions_only_follow_an_unchanged_base(
     world: World,
 ) -> None:
     base, remote, local = build(world)
-    for a in plan(base, remote, local, NO_GUARD).actions:
+    actions = plan(base, remote, local, NO_GUARD).actions
+    for a in actions:
         if isinstance(a, DeleteLocal):
+            if a.item_id not in base:
+                # A keyring duplicate of an iCloud login, kept in trash (#71).
+                assert Trash(local.items[a.item_id], "conflict") in actions
+                continue
             b = base[a.item_id]
             assert a.item_id not in remote.items
             assert content_key(local.items[a.item_id]) == content_key(b.credential)
@@ -126,7 +130,9 @@ def test_trash_precedes_the_write_it_protects(
     for a in plan(base, remote, local, NO_GUARD).actions:
         if isinstance(a, Trash):
             assert a.item_id not in seen_write
-        elif isinstance(a, (UpdateLocal, UpdateRemote, DeleteLocal, DeleteRemote, Link)):
+        elif isinstance(
+            a, (UpdateLocal, UpdateRemote, DeleteLocal, DeleteRemote, Link, MergeLocal)
+        ):
             seen_write.add(a.item_id)
 
 
@@ -150,7 +156,7 @@ def test_every_item_on_either_side_gets_at_most_one_write_per_store(
     local_writes: dict[str, int] = {}
     remote_writes: dict[str, int] = {}
     for a in plan(base, remote, local, NO_GUARD).actions:
-        if isinstance(a, (CreateLocal, UpdateLocal, DeleteLocal, ForkLocal)):
+        if isinstance(a, (CreateLocal, UpdateLocal, DeleteLocal, MergeLocal)):
             local_writes[a.item_id] = local_writes.get(a.item_id, 0) + 1
         if isinstance(a, (CreateRemote, UpdateRemote, DeleteRemote)):
             remote_writes[a.item_id] = remote_writes.get(a.item_id, 0) + 1
@@ -251,7 +257,7 @@ def test_every_keyring_write_precedes_every_icloud_write(world: World) -> None:
     base, remote, local = build(world)
     kinds = [
         "local"
-        if isinstance(a, (CreateLocal, UpdateLocal, DeleteLocal, ForkLocal, Link))
+        if isinstance(a, (CreateLocal, UpdateLocal, DeleteLocal, MergeLocal, Link))
         else "remote"
         if isinstance(a, (CreateRemote, UpdateRemote, DeleteRemote))
         else "state"

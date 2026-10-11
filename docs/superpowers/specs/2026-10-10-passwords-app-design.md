@@ -88,7 +88,7 @@ Per item id, compare **base** (last synced, in state.db) with **remote** and **l
 |---|---|---|---|
 | — | new | — | create local |
 | — | — | new | create remote (local item gets an id) |
-| — | new | new | equal content → link; else both kept (distinct ids) |
+| — | new | new | equal content → link; else newer `modified` wins (tie → iCloud), loser → trash (`conflict`) |
 | ✓ | = | = | nothing |
 | ✓ | changed | = | update local |
 | ✓ | = | changed | update remote |
@@ -101,6 +101,12 @@ Per item id, compare **base** (last synced, in state.db) with **remote** and **l
 
 First sync of a non-empty collection: local items without base that match a remote item on
 (normalized host, username, password) are **linked**, not duplicated.
+
+iCloud Keychain keeps one login per site and username (host and username case-insensitively,
+scheme, port, path), so a second one can never be uploaded. A new local item that duplicates
+an iCloud login's site and username is merged into it: if it is newer it replaces that login
+in the keyring under the login's id (the next cycle uploads it) and the displaced version goes
+to trash; otherwise the duplicate itself goes to trash (`conflict`) and leaves the keyring.
 
 Guards (never bypassed silently):
 - Local side unreadable (collection locked/missing, D-Bus error) → cycle skipped; never read as "empty".

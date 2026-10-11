@@ -18,13 +18,12 @@ from passwords_app.sync.plan import (
     DeleteLocal,
     DeleteRemote,
     DropBase,
-    ForkLocal,
     Link,
+    MergeLocal,
     SetBase,
     Trash,
     UpdateLocal,
     UpdateRemote,
-    fork_id,
     plan,
 )
 from passwords_app.sync.ports import LocalSnapshot, RemoteItem, RemoteSnapshot, SyncPolicy
@@ -251,54 +250,217 @@ def test_same_id_on_both_sides_with_equal_content_is_linked() -> None:
 
 
 @pytest.mark.parametrize("field", FIELDS)
-def test_same_id_with_different_content_keeps_both(field: str) -> None:
+def test_same_id_with_different_content_newer_local_wins(field: str) -> None:
+    # iCloud Keychain keeps one login per site and username, so a fork copy could never
+    # be uploaded (#71): the newer version keeps the id, the other goes to trash.
     remote = make_credential("SAME", modified=5)
     local = edit(remote, modified=9, **{field: FIELD_VALUES[field][0]})
     result = run(None, remote, local, remote_etag="e6")
-    copy = dataclasses.replace(local, id=fork_id("SAME", local))
-    assert result.actions == (
-        ForkLocal(copy, "SAME"),
-        UpdateLocal(remote, "e6"),
-        CreateRemote(copy),
-    )
-    assert copy.id != "SAME"
+    assert result.actions == (Trash(remote, "conflict"), UpdateRemote(local, "e6"))
 
 
-def test_fork_id_is_deterministic_and_content_bound() -> None:
-    a = make_credential("X", password="fake-one")
-    b = make_credential("X", password="fake-two")
-    assert fork_id("X", a) == fork_id("X", a)
-    assert fork_id("X", a) != fork_id("X", b)
-    assert fork_id("X", a) != fork_id("Y", a)
-    assert fork_id("X", a) == fork_id("X", a).upper()
-
-
-def test_fork_is_not_repeated_when_the_copy_already_exists_locally() -> None:
-    # A cycle that crashed after saving the copy must not save it again.
+@pytest.mark.parametrize("local_modified", [3, 5])
+def test_same_id_with_different_content_newer_or_tied_icloud_wins(local_modified: int) -> None:
     remote = make_credential("SAME", modified=5)
-    local = make_credential("SAME", modified=9, password="fake-mine")
-    copy = dataclasses.replace(local, id=fork_id("SAME", local))
+    local = edit(remote, modified=local_modified, password="fake-mine")
+    result = run(None, remote, local, remote_etag="e6")
+    assert result.actions == (Trash(local, "conflict"), UpdateLocal(remote, "e6"))
+
+
+def _twin(of: Credential, item_id: str, *, modified: int, **changes: Any) -> Credential:
+    """A keyring login with `of`'s site and username under another id."""
+    return edit(dataclasses.replace(of, id=item_id), modified=modified, **changes)
+
+
+def test_newer_keyring_duplicate_of_a_synced_login_replaces_it_in_the_keyring() -> None:
+    synced = make_credential("A", modified=5)
+    dup = _twin(synced, "B", modified=9, password="fake-newer")
+    result = plan(
+        {"A": BaseEntry(synced, "e1")},
+        RemoteSnapshot({"A": RemoteItem(synced, "e1")}),
+        LocalSnapshot({"A": synced, "B": dup}),
+        POLICY,
+    )
+    winner = dataclasses.replace(dup, id="A")
+    assert result.actions == (
+        Trash(synced, "conflict"),
+        MergeLocal("B", winner),
+        UpdateRemote(winner, "e1"),
+    )
+
+
+def test_a_merge_whose_upload_failed_is_uploaded_by_the_next_cycle() -> None:
+    synced = make_credential("A", modified=5)
+    winner = edit(synced, modified=9, password="fake-newer")
+    result = plan(
+        {"A": BaseEntry(synced, "e1")},
+        RemoteSnapshot({"A": RemoteItem(synced, "e1")}),
+        LocalSnapshot({"A": winner}),
+        POLICY,
+    )
+    assert result.actions == (UpdateRemote(winner, "e1"),)
+
+
+@pytest.mark.parametrize("dup_modified", [3, 5])
+def test_older_or_tied_keyring_duplicate_goes_to_trash(dup_modified: int) -> None:
+    synced = make_credential("A", modified=5)
+    dup = _twin(synced, "B", modified=dup_modified, password="fake-older")
+    result = plan(
+        {"A": BaseEntry(synced, "e1")},
+        RemoteSnapshot({"A": RemoteItem(synced, "e1")}),
+        LocalSnapshot({"A": synced, "B": dup}),
+        POLICY,
+    )
+    assert result.actions == (Trash(dup, "conflict"), DeleteLocal("B"))
+    assert result.pending is None
+
+
+def test_keyring_duplicate_of_a_new_icloud_login_is_merged_on_first_sync() -> None:
+    phone = make_credential("A", modified=5)
+    seahorse = _twin(phone, "B", modified=9, username=phone.username.upper(), password="fake-x")
     result = plan(
         {},
-        RemoteSnapshot({"SAME": RemoteItem(remote, "e1")}),
-        LocalSnapshot({"SAME": local, copy.id: copy}),
+        RemoteSnapshot({"A": RemoteItem(phone, "e1")}),
+        LocalSnapshot({"B": seahorse}),
         POLICY,
     )
-    assert not any(isinstance(a, ForkLocal) for a in result.actions)
-    assert set(result.actions) == {UpdateLocal(remote, "e1"), CreateRemote(copy)}
+    winner = dataclasses.replace(seahorse, id="A")
+    assert result.actions == (
+        Trash(phone, "conflict"),
+        MergeLocal("B", winner),
+        UpdateRemote(winner, "e1"),
+    )
 
 
-def test_fork_is_not_repeated_when_the_copy_already_reached_icloud() -> None:
-    remote = make_credential("SAME", modified=5)
-    local = make_credential("SAME", modified=9, password="fake-mine")
-    copy = dataclasses.replace(local, id=fork_id("SAME", local))
+def test_older_keyring_duplicate_of_a_new_icloud_login_yields_to_it() -> None:
+    phone = make_credential("A", modified=9)
+    seahorse = _twin(phone, "B", modified=5, password="fake-x")
     result = plan(
-        {copy.id: BaseEntry(copy, "c1")},
-        RemoteSnapshot({"SAME": RemoteItem(remote, "e1"), copy.id: RemoteItem(copy, "c1")}),
-        LocalSnapshot({"SAME": local, copy.id: copy}),
+        {},
+        RemoteSnapshot({"A": RemoteItem(phone, "e1")}),
+        LocalSnapshot({"B": seahorse}),
         POLICY,
     )
-    assert result.actions == (UpdateLocal(remote, "e1"),)
+    assert set(result.actions) == {
+        Trash(seahorse, "conflict"),
+        DeleteLocal("B"),
+        CreateLocal(phone, "e1"),
+    }
+
+
+def test_logins_on_another_path_are_not_duplicates() -> None:
+    synced = make_credential("A", modified=5)
+    other = _twin(synced, "B", modified=9, url=synced.url + "/admin", password="fake-x")
+    result = plan(
+        {"A": BaseEntry(synced, "e1")},
+        RemoteSnapshot({"A": RemoteItem(synced, "e1")}),
+        LocalSnapshot({"A": synced, "B": other}),
+        POLICY,
+    )
+    assert result.actions == (CreateRemote(other),)
+
+
+def test_a_second_duplicate_waits_while_the_first_is_merged() -> None:
+    synced = make_credential("A", modified=5)
+    first = _twin(synced, "B", modified=9, password="fake-b")
+    second = _twin(synced, "C", modified=7, password="fake-c")
+    result = plan(
+        {"A": BaseEntry(synced, "e1")},
+        RemoteSnapshot({"A": RemoteItem(synced, "e1")}),
+        LocalSnapshot({"A": synced, "B": first, "C": second}),
+        POLICY,
+    )
+    winner = dataclasses.replace(first, id="A")
+    assert result.actions == (
+        Trash(synced, "conflict"),
+        MergeLocal("B", winner),
+        UpdateRemote(winner, "e1"),
+    )
+
+
+@pytest.mark.parametrize("dup_modified", [3, 9])
+def test_a_twin_moved_to_another_site_in_the_keyring_is_not_merged(dup_modified: int) -> None:
+    synced = make_credential("A", modified=5)
+    moved = edit(synced, modified=6, url="https://new.example.com")
+    dup = _twin(synced, "B", modified=dup_modified, password="fake-b")
+    result = plan(
+        {"A": BaseEntry(synced, "e1")},
+        RemoteSnapshot({"A": RemoteItem(synced, "e1")}),
+        LocalSnapshot({"A": moved, "B": dup}),
+        POLICY,
+    )
+    assert set(result.actions) == {UpdateRemote(moved, "e1"), CreateRemote(dup)}
+
+
+def test_a_written_default_port_picks_the_twin_icloud_keeps_apart() -> None:
+    plain = make_credential("A", modified=5, url="https://x.example.com")
+    with_port = make_credential("B", modified=5, url="https://x.example.com:443")
+    dup = _twin(with_port, "C", modified=9, password="fake-c")
+    result = plan(
+        {"A": BaseEntry(plain, "e1"), "B": BaseEntry(with_port, "e2")},
+        RemoteSnapshot({"A": RemoteItem(plain, "e1"), "B": RemoteItem(with_port, "e2")}),
+        LocalSnapshot({"A": plain, "B": with_port, "C": dup}),
+        POLICY,
+    )
+    winner = dataclasses.replace(dup, id="B")
+    assert result.actions == (
+        Trash(with_port, "conflict"),
+        MergeLocal("C", winner),
+        UpdateRemote(winner, "e2"),
+    )
+
+
+def test_a_duplicate_never_replaces_a_login_the_user_restored() -> None:
+    synced = make_credential("A", modified=5)
+    restored = edit(synced, modified=1, password="fake-restored")
+    dup = _twin(synced, "B", modified=9, password="fake-b")
+    result = plan(
+        {"A": BaseEntry(synced, "e1")},
+        RemoteSnapshot({"A": RemoteItem(synced, "e1")}),
+        LocalSnapshot({"A": restored, "B": dup}),
+        POLICY,
+        restored=frozenset({"A"}),
+    )
+    assert set(result.actions) == {
+        Trash(dup, "conflict"),
+        DeleteLocal("B"),
+        UpdateRemote(restored, "e1"),
+    }
+
+
+def test_a_duplicate_waits_while_icloud_has_an_edit_of_its_twin() -> None:
+    # Merged now, a duplicate equal to the old base would look unchanged next cycle and be
+    # overwritten by iCloud's edit without a trash copy.
+    synced = make_credential("A", modified=1, password="fake-x")
+    mine = edit(synced, modified=10, password="fake-y")
+    theirs = edit(synced, modified=20, password="fake-z")
+    dup = _twin(synced, "B", modified=30)
+    result = plan(
+        {"A": BaseEntry(synced, "e1")},
+        RemoteSnapshot({"A": RemoteItem(theirs, "e2")}),
+        LocalSnapshot({"A": mine, "B": dup}),
+        POLICY,
+    )
+    assert all(a.item_id == "A" for a in result.actions)
+    assert result.actions == (Trash(mine, "conflict"), UpdateLocal(theirs, "e2"))
+
+
+def test_a_restored_duplicate_replaces_its_twin_even_when_older() -> None:
+    phone = make_credential("A", modified=9)
+    restored = _twin(phone, "B", modified=1, password="fake-restored")
+    result = plan(
+        {},
+        RemoteSnapshot({"A": RemoteItem(phone, "e1")}),
+        LocalSnapshot({"B": restored}),
+        POLICY,
+        restored=frozenset({"B"}),
+    )
+    winner = dataclasses.replace(restored, id="A")
+    assert result.actions == (
+        Trash(phone, "conflict"),
+        MergeLocal("B", winner),
+        UpdateRemote(winner, "e1"),
+    )
 
 
 # ---------------------------------------------------------------- whole-plan properties
@@ -329,33 +491,20 @@ def test_independent_items_are_planned_independently() -> None:
     )
 
 
-def test_edited_fork_from_an_interrupted_cycle_does_not_vouch_for_the_original() -> None:
-    remote = make_credential("SAME", modified=5)
-    local = make_credential("SAME", modified=9, password="fake-mine")
-    fork = dataclasses.replace(local, id=fork_id("SAME", local), notes="edited since")
-    result = plan(
-        {},
-        RemoteSnapshot({"SAME": RemoteItem(remote, "e1")}),
-        LocalSnapshot({"SAME": local, fork.id: fork}),
-        POLICY,
-    )
-    assert Trash(local, "conflict") in result.actions
-    assert result.actions.index(Trash(local, "conflict")) < result.actions.index(
-        UpdateLocal(remote, "e1")
-    )
-
-
-def test_a_fork_left_by_a_cancelled_cycle_is_uploaded_not_linked_back() -> None:
-    # #17: the cycle saved the copy and overwrote the original with iCloud's version, then
-    # was cancelled before its base updates committed. The copy shares site, account and
-    # password with iCloud's version, but linking them would put it back in trash.
+def test_a_fork_copy_left_by_an_older_version_is_merged_back() -> None:
+    # Releases before #71 kept a same-id conflict as a keyring-only copy iCloud refuses.
     remote = make_credential("SAME", modified=5, notes="from the iPhone")
-    local = make_credential("SAME", modified=9, notes="mine")
-    copy = dataclasses.replace(local, id=fork_id("SAME", local))
+    copy = make_credential("SAME", modified=9, notes="mine")
+    copy = dataclasses.replace(copy, id="FORK")
     result = plan(
-        {},
+        {"SAME": BaseEntry(remote, "e1")},
         RemoteSnapshot({"SAME": RemoteItem(remote, "e1")}),
-        LocalSnapshot({"SAME": remote, copy.id: copy}),
+        LocalSnapshot({"SAME": remote, "FORK": copy}),
         POLICY,
     )
-    assert set(result.actions) == {Link("SAME", remote, "e1"), CreateRemote(copy)}
+    winner = dataclasses.replace(copy, id="SAME")
+    assert result.actions == (
+        Trash(remote, "conflict"),
+        MergeLocal("FORK", winner),
+        UpdateRemote(winner, "e1"),
+    )
