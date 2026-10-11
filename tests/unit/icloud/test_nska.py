@@ -1,54 +1,109 @@
-"""NSKeyedArchiver expander tests, incl. NSData object unwrapping (the IESCiphertext case).
+# SPDX-FileCopyrightText: 2026 Alex Mextner
+# SPDX-License-Identifier: MIT
+"""NSKeyedArchiver expansion of TLK share ciphertexts."""
 
-Run: .venv/bin/python -m unittest tests.test_nska
-"""
+from __future__ import annotations
 
 import plistlib
-import unittest
+
+import pytest
+from tests.fakes.cloudkit_server import keyed_archive
 
 from passwords_app.icloud.keychain import nska
 
 
-def _nsdata_archive(values: dict) -> bytes:
-    """Build a realistic NSKeyedArchiver where each value is an NSMutableData OBJECT
-    ({$class -> NSMutableData, NS.data -> bytes}) - as Apple archives the IESCiphertext
-    ephemeral sender key - rather than a bare plist Data."""
-    objects = ["$null"]
+def _archive(objects: list[object], root: int = 1) -> bytes:
+    return plistlib.dumps(
+        {"$archiver": "NSKeyedArchiver", "$top": {"root": plistlib.UID(root)}, "$objects": objects},
+        fmt=plistlib.FMT_BINARY,
+    )
 
-    def add(o):
+
+def _nsdata_archive(values: dict[str, bytes]) -> bytes:
+    """Each value archived as an NSMutableData object, as Apple stores the ephemeral key."""
+    objects: list[object] = ["$null"]
+
+    def add(o: object) -> plistlib.UID:
         objects.append(o)
         return plistlib.UID(len(objects) - 1)
 
     cls = add({"$classname": "NSMutableData", "$classes": ["NSMutableData", "NSData", "NSObject"]})
-    top = {}
+    top: dict[str, object] = {}
     for k, v in values.items():
-        data_uid = add(v)
-        top[k] = add({"$class": cls, "NS.data": data_uid})
+        top[k] = add({"$class": cls, "NS.data": add(v)})
     root = add(top)
-    return plistlib.dumps({"$version": 100000, "$archiver": "NSKeyedArchiver",
-                           "$top": {"root": root}, "$objects": objects},
-                          fmt=plistlib.FMT_BINARY)
+    return _archive(objects, root.data)
 
 
-class NsdataUnwrapTests(unittest.TestCase):
-    def test_unwraps_nsdata_object_to_bytes(self):
-        raw = _nsdata_archive({
-            "SFEphemeralSenderPublicKeyExternaRepresentation": b"\x04" + b"\xab" * 96,
-            "SFIESAuthenticationCode": b"\x11" * 16,
-        })
-        out = nska.expand(raw)
-        # the wrapped NSData yields raw bytes, NOT {"NS.data": ...}
-        self.assertEqual(out["SFEphemeralSenderPublicKeyExternaRepresentation"],
-                         b"\x04" + b"\xab" * 96)
-        self.assertEqual(out["SFIESAuthenticationCode"], b"\x11" * 16)
-
-    def test_plain_dict_not_unwrapped(self):
-        # a dict WITHOUT $class (not an archived object) is left as-is
-        objects = ["$null", {"hello": "world"}]
-        raw = plistlib.dumps({"$archiver": "NSKeyedArchiver", "$top": {"root": plistlib.UID(1)},
-                              "$objects": objects}, fmt=plistlib.FMT_BINARY)
-        self.assertEqual(nska.expand(raw), {"hello": "world"})
+def test_unwraps_nsdata_objects_to_bytes() -> None:
+    out = nska.expand(_nsdata_archive({"SFIESAuthenticationCode": b"\x11" * 16, "K": b"\x04"}))
+    assert out == {"SFIESAuthenticationCode": b"\x11" * 16, "K": b"\x04"}
 
 
-if __name__ == "__main__":
-    unittest.main()
+def test_plain_dictionary_is_left_as_is() -> None:
+    assert nska.expand(_archive(["$null", {"hello": "world"}])) == {"hello": "world"}
+
+
+def test_null_reference_becomes_none() -> None:
+    assert nska.expand(_archive(["$null", {"a": plistlib.UID(0)}])) == {"a": None}
+
+
+def test_nsstring_and_array_unwrap() -> None:
+    objects: list[object] = [
+        "$null",
+        {"s": plistlib.UID(2), "l": plistlib.UID(3)},
+        {"$class": plistlib.UID(4), "NS.string": "text"},
+        {"$class": plistlib.UID(4), "NS.objects": [plistlib.UID(5)]},
+        {"$classname": "X"},
+        b"item",
+    ]
+    assert nska.expand(_archive(objects)) == {"s": "text", "l": [b"item"]}
+
+
+def test_fake_share_archive_expands() -> None:
+    assert nska.expand(keyed_archive({"A": b"1", "B": b"2"})) == {"A": b"1", "B": b"2"}
+
+
+@pytest.mark.parametrize(
+    "data",
+    [
+        b"not a plist",
+        plistlib.dumps([1, 2]),
+        plistlib.dumps({"$objects": "x", "$top": {}}),
+        _archive(["$null", "a string root"]),
+    ],
+)
+def test_malformed_archives_raise(data: bytes) -> None:
+    with pytest.raises(nska.ArchiveError):
+        nska.expand(data)
+
+
+def test_dangling_reference_raises() -> None:
+    with pytest.raises(nska.ArchiveError, match="out of range"):
+        nska.expand(_archive(["$null", {"a": plistlib.UID(9)}]))
+
+
+def test_reference_cycle_raises_instead_of_recursing() -> None:
+    with pytest.raises(nska.ArchiveError, match="deeply"):
+        nska.expand(_archive(["$null", {"self": plistlib.UID(1)}]))
+
+
+def test_shared_reference_fan_out_is_cut_off() -> None:
+    # 31 objects each pointing twice at the next stay under the depth cap but expand to 2^31.
+    objects: list[object] = ["$null"]
+    objects += [{"a": plistlib.UID(k + 1), "b": plistlib.UID(k + 1)} for k in range(1, 31)]
+    objects.append("leaf")
+    with pytest.raises(nska.ArchiveError, match="too many objects"):
+        nska.expand(_archive(objects))
+
+
+def test_non_string_object_key_is_an_archive_error(monkeypatch: pytest.MonkeyPatch) -> None:
+    # plistlib refuses to write such a key, but a binary plist from the wire can hold one.
+    archive: dict[str, object] = {"$top": {"root": plistlib.UID(1)}, "$objects": ["$null", {1: 0}]}
+
+    def loads(_data: bytes, **_kw: object) -> object:
+        return archive
+
+    monkeypatch.setattr(nska.plistlib, "loads", loads)
+    with pytest.raises(nska.ArchiveError, match="not a string"):
+        nska.expand(b"ignored")
