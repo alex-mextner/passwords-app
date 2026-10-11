@@ -1,41 +1,51 @@
-"""Filesystem locations. Everything lives under $XDG_CONFIG_HOME/icp."""
+# SPDX-FileCopyrightText: 2026 Alex Mextner
+# SPDX-License-Identifier: MIT
+"""Where the iCloud client keeps its state: `$XDG_CONFIG_HOME/passwords-app` by default.
 
+Path lookups are pure; only `ensure()` touches the filesystem, so reading a session never
+creates or re-permissions anything.
+"""
+
+from __future__ import annotations
+
+import dataclasses
 import os
 from pathlib import Path
 
-
-def config_dir() -> Path:
-    base = os.environ.get("XDG_CONFIG_HOME") or os.path.expanduser("~/.config")
-    d = Path(base) / "passwords-app"
-    d.mkdir(parents=True, exist_ok=True)
-    # Tokens and identity are sensitive; keep the directory private.
-    os.chmod(d, 0o700)
-    return d
+APP_DIR = "passwords-app"
 
 
-def device_file() -> Path:
-    return config_dir() / "device.json"
+def default_config_dir() -> Path:
+    base = os.environ.get("XDG_CONFIG_HOME") or str(Path.home() / ".config")
+    return Path(base) / APP_DIR
 
 
-def session_file() -> Path:
-    return config_dir() / "session.enc"
+@dataclasses.dataclass(frozen=True, slots=True)
+class ConfigPaths:
+    root: Path
 
+    @classmethod
+    def default(cls) -> ConfigPaths:
+        return cls(default_config_dir())
 
-def fallback_key_file() -> Path:
-    return config_dir() / "master.key"
+    def ensure(self) -> Path:
+        """Create the directory private to the user (tokens and keys live here)."""
+        self.root.mkdir(parents=True, exist_ok=True, mode=0o700)
+        self.root.chmod(0o700)
+        return self.root
 
+    @property
+    def device(self) -> Path:
+        return self.root / "device.json"
 
-def vault_file() -> Path:
-    return config_dir() / "vault.enc"
+    @property
+    def session(self) -> Path:
+        return self.root / "session.enc"
 
+    @property
+    def fallback_key(self) -> Path:
+        return self.root / "master.key"
 
-def aliases_file() -> Path:
-    return config_dir() / "aliases.enc"
-
-
-def sync_lock_file() -> Path:
-    return config_dir() / "sync.lock"
-
-
-def sync_attempt_file() -> Path:
-    return config_dir() / "sync.attempt"
+    @property
+    def zone_cache(self) -> Path:
+        return self.root / "icloud-zones.json"
