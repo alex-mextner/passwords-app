@@ -1,0 +1,91 @@
+/* SPDX-FileCopyrightText: 2026 Alex Mextner
+   SPDX-License-Identifier: MIT */
+
+.monogram {
+  color: white;
+  font-weight: 800;
+  border-radius: 9px;
+  text-shadow: 0 1px 1px alpha(black, 0.18);
+  box-shadow: inset 0 0 0 1px alpha(white, 0.10), 0 1px 2px alpha(black, 0.12);
+}
+.monogram-32 { font-size: 15px; border-radius: 8px; min-width: 32px; min-height: 32px; }
+.monogram-40 { font-size: 18px; border-radius: 10px; min-width: 40px; min-height: 40px; }
+.monogram-72 { font-size: 32px; border-radius: 17px; min-width: 72px; min-height: 72px; }
+.monogram.tint-0 { background-image: linear-gradient(to bottom, #62a0ea, #1c71d8); }
+.monogram.tint-1 { background-image: linear-gradient(to bottom, #33c7de, #0f8a9e); }
+.monogram.tint-2 { background-image: linear-gradient(to bottom, #57e389, #26a269); }
+.monogram.tint-3 { background-image: linear-gradient(to bottom, #f8c94c, #e5a50a); }
+.monogram.tint-4 { background-image: linear-gradient(to bottom, #ffa348, #e66100); }
+.monogram.tint-5 { background-image: linear-gradient(to bottom, #f66151, #c01c28); }
+.monogram.tint-6 { background-image: linear-gradient(to bottom, #f68ad0, #c4307f); }
+.monogram.tint-7 { background-image: linear-gradient(to bottom, #c061cb, #813d9c); }
+.monogram.tint-8 { background-image: linear-gradient(to bottom, #cdab8f, #865e3c); }
+.monogram.tint-9 { background-image: linear-gradient(to bottom, #9a9996, #5e5c64); }
+
+.favicon { border-radius: 8px; background-color: white; box-shadow: 0 0 0 1px alpha(black, 0.08); }
+.favicon-32 { min-width: 32px; min-height: 32px; }
+.favicon-72 { min-width: 72px; min-height: 72px; border-radius: 17px; }
+
+.sidebar-count {
+  font-feature-settings: "tnum";
+  opacity: 0.55;
+}
+.sidebar-badge {
+  font-feature-settings: "tnum";
+  font-weight: 700;
+  font-size: smaller;
+  color: white;
+  background-color: var(--warning-bg-color, #e5a50a);
+  border-radius: 999px;
+  min-width: 14px;
+  padding: 1px 6px;
+}
+
+.item-row { padding: 6px 4px; }
+.item-row .title { font-weight: 600; }
+
+.detail-title { font-size: 22pt; font-weight: 800; }
+.detail-header { margin-top: 6px; margin-bottom: 12px; }
+
+/* Only the value is monospace; the row's field label keeps the UI font. */
+.secret-value text, .secret-value .subtitle { font-family: monospace; font-size: 1.05em; }
+.code-value {
+  font-family: monospace;
+  font-size: 1.35em;
+  font-weight: 700;
+  font-feature-settings: "tnum";
+  letter-spacing: 0.04em;
+}
+.code-value.urgent, .countdown-ring.urgent { color: var(--error-color, #e01b24); }
+.list-code { font-family: monospace; font-weight: 700; font-feature-settings: "tnum"; }
+
+.strength-meter { margin: 0 12px 10px 12px; }
+levelbar.discrete block, levelbar block { min-height: 4px; border-radius: 2px; }
+levelbar block.very-weak { background-color: #e01b24; }
+levelbar block.weak { background-color: #ff7800; }
+levelbar block.good { background-color: #f6d32d; }
+levelbar block.strong { background-color: #2ec27e; }
+
+.warning-row image.warning-icon { color: var(--warning-color, #c88800); }
+.error-row image.warning-icon { color: var(--error-color, #e01b24); }
+
+.code-box {
+  font-family: monospace;
+  font-size: 22pt;
+  font-weight: 700;
+  min-width: 44px;
+  min-height: 56px;
+  padding: 0;
+}
+.code-box text { padding: 0; }
+
+.generated-password {
+  font-family: monospace;
+  font-size: 1.25em;
+  font-weight: 600;
+  letter-spacing: 0.03em;
+}
+
+.lock-screen { background-color: var(--window-bg-color); }
+
+.hint { opacity: 0.7; }

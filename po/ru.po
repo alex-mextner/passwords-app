@@ -1,0 +1,1230 @@
+# Russian translation of passwords-app.
+# SPDX-FileCopyrightText: 2026 Alex Mextner
+# SPDX-License-Identifier: MIT
+#
+msgid ""
+msgstr ""
+"Project-Id-Version: passwords-app 0.1.0\n"
+"Report-Msgid-Bugs-To: \n"
+"POT-Creation-Date: 2026-10-11 03:00+0200\n"
+"PO-Revision-Date: 2026-10-10 22:40+0200\n"
+"Last-Translator: Alex Mextner\n"
+"Language-Team: Russian\n"
+"Language: ru\n"
+"MIME-Version: 1.0\n"
+"Content-Type: text/plain; charset=UTF-8\n"
+"Content-Transfer-Encoding: 8bit\n"
+"Plural-Forms: nplurals=3; plural=(n%10==1 && n%100!=11 ? 0 : n%10>=2 && n%10<=4 && (n%100<10 || n%100>=20) ? 1 : 2);\n"
+
+#: src/passwords_app/app/formatting.py:29
+#, python-brace-format
+msgid "January {day}, {year}"
+msgstr "{day} января {year} г."
+
+#: src/passwords_app/app/formatting.py:30
+#, python-brace-format
+msgid "February {day}, {year}"
+msgstr "{day} февраля {year} г."
+
+#: src/passwords_app/app/formatting.py:31
+#, python-brace-format
+msgid "March {day}, {year}"
+msgstr "{day} марта {year} г."
+
+#: src/passwords_app/app/formatting.py:32
+#, python-brace-format
+msgid "April {day}, {year}"
+msgstr "{day} апреля {year} г."
+
+#: src/passwords_app/app/formatting.py:33
+#, python-brace-format
+msgid "May {day}, {year}"
+msgstr "{day} мая {year} г."
+
+#: src/passwords_app/app/formatting.py:34
+#, python-brace-format
+msgid "June {day}, {year}"
+msgstr "{day} июня {year} г."
+
+#: src/passwords_app/app/formatting.py:35
+#, python-brace-format
+msgid "July {day}, {year}"
+msgstr "{day} июля {year} г."
+
+#: src/passwords_app/app/formatting.py:36
+#, python-brace-format
+msgid "August {day}, {year}"
+msgstr "{day} августа {year} г."
+
+#: src/passwords_app/app/formatting.py:37
+#, python-brace-format
+msgid "September {day}, {year}"
+msgstr "{day} сентября {year} г."
+
+#: src/passwords_app/app/formatting.py:38
+#, python-brace-format
+msgid "October {day}, {year}"
+msgstr "{day} октября {year} г."
+
+#: src/passwords_app/app/formatting.py:39
+#, python-brace-format
+msgid "November {day}, {year}"
+msgstr "{day} ноября {year} г."
+
+#: src/passwords_app/app/formatting.py:40
+#, python-brace-format
+msgid "December {day}, {year}"
+msgstr "{day} декабря {year} г."
+
+#: src/passwords_app/app/formatting.py:68
+#, python-brace-format
+msgid "today at {time}"
+msgstr "сегодня в {time}"
+
+#: src/passwords_app/app/formatting.py:68
+#, python-brace-format
+msgid "Today at {time}"
+msgstr "Сегодня в {time}"
+
+#: src/passwords_app/app/formatting.py:71
+#, python-brace-format
+msgid "yesterday at {time}"
+msgstr "вчера в {time}"
+
+#: src/passwords_app/app/formatting.py:71
+#, python-brace-format
+msgid "Yesterday at {time}"
+msgstr "Вчера в {time}"
+
+#: src/passwords_app/app/formatting.py:80
+msgid "just now"
+msgstr "только что"
+
+#: src/passwords_app/app/formatting.py:83
+#, python-brace-format
+msgid "{n} minute ago"
+msgid_plural "{n} minutes ago"
+msgstr[0] "{n} минуту назад"
+msgstr[1] "{n} минуты назад"
+msgstr[2] "{n} минут назад"
+
+#: src/passwords_app/app/formatting.py:86
+#, python-brace-format
+msgid "{n} hour ago"
+msgid_plural "{n} hours ago"
+msgstr[0] "{n} час назад"
+msgstr[1] "{n} часа назад"
+msgstr[2] "{n} часов назад"
+
+#: src/passwords_app/app/formatting.py:97
+msgid "Removed today"
+msgstr "Удаляется сегодня"
+
+#: src/passwords_app/app/formatting.py:98
+#, python-brace-format
+msgid "{n} day left"
+msgid_plural "{n} days left"
+msgstr[0] "Остался {n} день"
+msgstr[1] "Осталось {n} дня"
+msgstr[2] "Осталось {n} дней"
+
+#: src/passwords_app/app/formatting.py:103
+msgid "Deleted on this computer"
+msgstr "Удалено на этом компьютере"
+
+#: src/passwords_app/app/formatting.py:104
+msgid "Deleted on another device"
+msgstr "Удалено на другом устройстве"
+
+#: src/passwords_app/app/formatting.py:105
+msgid "Deleted everywhere"
+msgstr "Удалено везде"
+
+#: src/passwords_app/app/formatting.py:106
+msgid "Replaced by a newer edit"
+msgstr "Заменено более новой правкой"
+
+#: src/passwords_app/app/formatting.py:108
+msgctxt "why an item is in Deleted"
+msgid "Deleted"
+msgstr "Удалено"
+
+#: src/passwords_app/app/formatting.py:114
+msgid "Synced"
+msgstr "Синхронизировано"
+
+#: src/passwords_app/app/formatting.py:115
+msgid "Syncing…"
+msgstr "Синхронизация…"
+
+#: src/passwords_app/app/formatting.py:116
+msgid "Sync Paused"
+msgstr "На паузе"
+
+#: src/passwords_app/app/formatting.py:117
+msgid "Offline"
+msgstr "Нет сети"
+
+#: src/passwords_app/app/formatting.py:118
+msgid "Sign-In Required"
+msgstr "Требуется вход"
+
+#: src/passwords_app/app/formatting.py:119
+msgid "Not Signed In"
+msgstr "Вход не выполнен"
+
+#: src/passwords_app/app/formatting.py:120
+msgid "Sync Error"
+msgstr "Сбой синхронизации"
+
+#: src/passwords_app/app/formatting.py:121
+msgid "Service Not Running"
+msgstr "Служба не запущена"
+
+#: src/passwords_app/app/formatting.py:147
+msgid "The Passwords background service is not running."
+msgstr "Фоновая служба «Паролей» не запущена."
+
+#: src/passwords_app/app/formatting.py:149
+msgid "Sign in with your Apple Account to sync passwords with iCloud Keychain."
+msgstr "Войдите с Аккаунтом Apple, чтобы синхронизировать пароли со Связкой ключей iCloud."
+
+#: src/passwords_app/app/formatting.py:151
+msgid "Apple asks you to sign in again before syncing can continue."
+msgstr "Apple просит войти снова, чтобы продолжить синхронизацию."
+
+#: src/passwords_app/app/formatting.py:155
+msgid "Not synced yet"
+msgstr "Еще не синхронизировано"
+
+#: src/passwords_app/app/formatting.py:156
+#, python-brace-format
+msgid "Last synced {when}"
+msgstr "Последняя синхронизация: {when}"
+
+#: src/passwords_app/app/formatting.py:162
+#, python-brace-format
+msgid "Sync paused: {n} password would be deleted"
+msgid_plural "Sync paused: {n} passwords would be deleted"
+msgstr[0] "Синхронизация приостановлена: будет удален {n} пароль"
+msgstr[1] "Синхронизация приостановлена: будут удалены {n} пароля"
+msgstr[2] "Синхронизация приостановлена: будут удалены {n} паролей"
+
+#: src/passwords_app/app/formatting.py:178
+#, python-brace-format
+msgid "Password copied · clears in {n} s"
+msgstr "Пароль скопирован · очистка через {n} с"
+
+#: src/passwords_app/app/formatting.py:179
+#: src/passwords_app/app/ui/application.py:363
+msgid "Password copied"
+msgstr "Пароль скопирован"
+
+#: src/passwords_app/app/formatting.py:182
+#, python-brace-format
+msgid "Verification code copied · clears in {n} s"
+msgstr "Код проверки скопирован · очистка через {n} с"
+
+#: src/passwords_app/app/formatting.py:183
+msgid "Verification code copied"
+msgstr "Код проверки скопирован"
+
+#: src/passwords_app/app/formatting.py:184
+msgid "User name copied"
+msgstr "Имя пользователя скопировано"
+
+#: src/passwords_app/app/formatting.py:188
+#, python-brace-format
+msgid "{n} password"
+msgid_plural "{n} passwords"
+msgstr[0] "{n} пароль"
+msgstr[1] "{n} пароля"
+msgstr[2] "{n} паролей"
+
+#: src/passwords_app/app/formatting.py:199
+msgid "Wrong passcode."
+msgstr "Неверный код-пароль."
+
+#: src/passwords_app/app/formatting.py:202
+#, python-brace-format
+msgid "Wrong passcode. {n} attempt left on this device."
+msgid_plural "Wrong passcode. {n} attempts left on this device."
+msgstr[0] "Неверный код-пароль. На этом устройстве осталась {n} попытка."
+msgstr[1] "Неверный код-пароль. На этом устройстве осталось {n} попытки."
+msgstr[2] "Неверный код-пароль. На этом устройстве осталось {n} попыток."
+
+#: src/passwords_app/app/sections.py:34
+#: src/passwords_app/app/ui/item_list.py:173
+msgid "All"
+msgstr "Все"
+
+#: src/passwords_app/app/sections.py:35
+#: src/passwords_app/app/ui/shortcuts.py:50
+msgid "Codes"
+msgstr "Коды"
+
+#: src/passwords_app/app/sections.py:36
+#: src/passwords_app/app/ui/shortcuts.py:51
+msgid "Security"
+msgstr "Безопасность"
+
+#: src/passwords_app/app/sections.py:37
+#: src/passwords_app/app/ui/shortcuts.py:53
+msgctxt "sidebar section"
+msgid "Deleted"
+msgstr "Удаленные"
+
+#: src/passwords_app/app/security.py:60
+msgid "Very Weak"
+msgstr "Очень слабый"
+
+#: src/passwords_app/app/security.py:61
+msgid "Weak"
+msgstr "Слабый"
+
+#: src/passwords_app/app/security.py:62
+msgid "Good"
+msgstr "Хороший"
+
+#: src/passwords_app/app/security.py:63 src/passwords_app/app/ui/editor.py:70
+msgid "Strong"
+msgstr "Надежный"
+
+#: src/passwords_app/app/security.py:125
+msgid "This password appeared in a data leak"
+msgstr "Этот пароль обнаружен в утечке данных"
+
+#: src/passwords_app/app/security.py:129
+#, python-brace-format
+msgid "Also used on {n} other website"
+msgid_plural "Also used on {n} other websites"
+msgstr[0] "Используется еще на {n} веб-сайте"
+msgstr[1] "Используется еще на {n} веб-сайтах"
+msgstr[2] "Используется еще на {n} веб-сайтах"
+
+#: src/passwords_app/app/security.py:131
+msgid "This password is easy to guess"
+msgstr "Этот пароль легко угадать"
+
+#: src/passwords_app/app/ui/application.py:129
+msgid "Run only as the GNOME Shell search provider"
+msgstr "Работать только как поставщик поиска GNOME Shell"
+
+#: src/passwords_app/app/ui/application.py:133
+msgid "Create a new password"
+msgstr "Создать новый пароль"
+
+#: src/passwords_app/app/ui/application.py:294
+msgid "Sign Out of iCloud?"
+msgstr "Выйти из iCloud?"
+
+#: src/passwords_app/app/ui/application.py:296
+msgid "Syncing stops. Passwords already on this computer stay in GNOME Keyring and in this app."
+msgstr "Синхронизация прекратится. Пароли, уже сохраненные на этом компьютере, останутся в GNOME Keyring и в этом приложении."
+
+#: src/passwords_app/app/ui/application.py:300
+#: src/passwords_app/app/ui/detail.py:91
+#: src/passwords_app/app/ui/new_password.py:39
+#: src/passwords_app/app/ui/window.py:406
+msgid "Cancel"
+msgstr "Отменить"
+
+#: src/passwords_app/app/ui/application.py:301
+msgid "Sign Out"
+msgstr "Выйти"
+
+#: src/passwords_app/app/ui/application.py:327
+#: src/passwords_app/app/ui/item_list.py:255
+#: src/passwords_app/app/ui/sidebar.py:73 src/passwords_app/app/ui/window.py:69
+#: src/passwords_app/app/ui/window.py:145
+msgid "Passwords"
+msgstr "Пароли"
+
+#: src/passwords_app/app/ui/application.py:335
+msgid "Your iCloud Keychain passwords on Linux, in sync with your Apple devices and GNOME Keyring."
+msgstr "Пароли из Связки ключей iCloud в Linux — синхронно с устройствами Apple и GNOME Keyring."
+
+#: src/passwords_app/app/ui/application.py:366
+#, python-brace-format
+msgid "The password for {title} is on the clipboard for {n} second."
+msgid_plural "The password for {title} is on the clipboard for {n} seconds."
+msgstr[0] "Пароль для «{title}» скопирован в буфер обмена на {n} секунду."
+msgstr[1] "Пароль для «{title}» скопирован в буфер обмена на {n} секунды."
+msgstr[2] "Пароль для «{title}» скопирован в буфер обмена на {n} секунд."
+
+#: src/passwords_app/app/ui/application.py:371
+#, python-brace-format
+msgid "The password for {title} is on the clipboard."
+msgstr "Пароль для «{title}» скопирован в буфер обмена."
+
+#: src/passwords_app/app/ui/detail.py:76 src/passwords_app/app/ui/detail.py:126
+#: src/passwords_app/app/ui/detail.py:340
+#: src/passwords_app/app/ui/editor.py:161
+#: src/passwords_app/app/ui/editor.py:164
+#: src/passwords_app/app/ui/editor.py:165
+#: src/passwords_app/app/ui/signin.py:221
+#: src/passwords_app/app/ui/signin.py:222
+msgid "Password"
+msgstr "Пароль"
+
+#: src/passwords_app/app/ui/detail.py:94
+#: src/passwords_app/app/ui/shortcuts.py:44
+msgid "Edit"
+msgstr "Изменить"
+
+#: src/passwords_app/app/ui/detail.py:96
+#: src/passwords_app/app/ui/new_password.py:41
+msgid "Save"
+msgstr "Сохранить"
+
+#: src/passwords_app/app/ui/detail.py:122
+#: src/passwords_app/app/ui/detail.py:265
+#: src/passwords_app/app/ui/editor.py:158
+msgid "User Name"
+msgstr "Имя пользователя"
+
+#: src/passwords_app/app/ui/detail.py:124
+#: src/passwords_app/app/ui/shortcuts.py:41
+msgid "Copy User Name"
+msgstr "Скопировать имя пользователя"
+
+#: src/passwords_app/app/ui/detail.py:131
+#: src/passwords_app/app/ui/detail.py:134
+#: src/passwords_app/app/ui/detail.py:490
+msgid "Show Password"
+msgstr "Показать пароль"
+
+#: src/passwords_app/app/ui/detail.py:138
+#: src/passwords_app/app/ui/shortcuts.py:40
+msgid "Copy Password"
+msgstr "Скопировать пароль"
+
+#: src/passwords_app/app/ui/detail.py:140
+msgid "Password Strength"
+msgstr "Надежность пароля"
+
+#: src/passwords_app/app/ui/detail.py:149
+#: src/passwords_app/app/ui/editor.py:183
+#: src/passwords_app/app/ui/signin.py:296
+msgid "Verification Code"
+msgstr "Код проверки"
+
+#: src/passwords_app/app/ui/detail.py:156
+#: src/passwords_app/app/ui/shortcuts.py:42
+msgid "Copy Verification Code"
+msgstr "Скопировать код проверки"
+
+#: src/passwords_app/app/ui/detail.py:161
+msgid "Security Recommendations"
+msgstr "Рекомендации по безопасности"
+
+#: src/passwords_app/app/ui/detail.py:164
+msgid "Websites"
+msgstr "Веб-сайты"
+
+#: src/passwords_app/app/ui/detail.py:167
+#: src/passwords_app/app/ui/editor.py:204
+#: src/passwords_app/app/ui/editor.py:214
+msgid "Notes"
+msgstr "Заметки"
+
+#: src/passwords_app/app/ui/detail.py:183
+msgid "Shared Group"
+msgstr "Общая группа"
+
+#: src/passwords_app/app/ui/detail.py:184
+msgid "Created"
+msgstr "Создан"
+
+#: src/passwords_app/app/ui/detail.py:185
+msgid "Modified"
+msgstr "Изменен"
+
+#: src/passwords_app/app/ui/detail.py:189
+msgid "Delete Password"
+msgstr "Удалить пароль"
+
+#: src/passwords_app/app/ui/detail.py:215
+msgid "No Password Selected"
+msgstr "Пароль не выбран"
+
+#: src/passwords_app/app/ui/detail.py:216
+msgid "Choose a password from the list."
+msgstr "Выберите пароль в списке."
+
+#: src/passwords_app/app/ui/detail.py:266
+#: src/passwords_app/app/ui/editor.py:156
+#: src/passwords_app/app/ui/editor.py:262
+#: src/passwords_app/app/ui/item_list.py:191
+msgid "Website"
+msgstr "Веб-сайт"
+
+#: src/passwords_app/app/ui/detail.py:267
+msgid "Why It Is Here"
+msgstr "Причина"
+
+#: src/passwords_app/app/ui/detail.py:268
+msgctxt "date an item was deleted"
+msgid "Deleted"
+msgstr "Удален"
+
+#: src/passwords_app/app/ui/detail.py:272
+msgid "Restore"
+msgstr "Восстановить"
+
+#: src/passwords_app/app/ui/detail.py:276
+#: src/passwords_app/app/ui/window.py:407
+msgid "Delete Now"
+msgstr "Удалить сейчас"
+
+#: src/passwords_app/app/ui/detail.py:283
+msgid "Restoring puts the password back on this computer and in iCloud."
+msgstr "Пароль вернется на этот компьютер и в iCloud."
+
+#: src/passwords_app/app/ui/detail.py:308
+#: src/passwords_app/app/ui/detail.py:380
+msgid "None"
+msgstr "Нет"
+
+#: src/passwords_app/app/ui/detail.py:376
+#, python-brace-format
+msgid "Last modified {when}"
+msgstr "Последнее изменение: {when}"
+
+#: src/passwords_app/app/ui/detail.py:425
+msgid "Change this password on the website, then update it here."
+msgstr "Смените пароль на веб-сайте, затем обновите его здесь."
+
+#: src/passwords_app/app/ui/detail.py:427
+msgid "Use a different password for every website."
+msgstr "Используйте для каждого веб-сайта свой пароль."
+
+#: src/passwords_app/app/ui/detail.py:449
+#, python-brace-format
+msgid "Open {site}"
+msgstr "Открыть {site}"
+
+#: src/passwords_app/app/ui/detail.py:490
+msgid "Hide Password"
+msgstr "Скрыть пароль"
+
+#: src/passwords_app/app/ui/editor.py:71
+msgid "Custom"
+msgstr "Свой"
+
+#: src/passwords_app/app/ui/editor.py:73
+msgid "Password style"
+msgstr "Тип пароля"
+
+#: src/passwords_app/app/ui/editor.py:84
+msgid "Length"
+msgstr "Длина"
+
+#: src/passwords_app/app/ui/editor.py:87
+msgid "Uppercase Letters"
+msgstr "Заглавные буквы"
+
+#: src/passwords_app/app/ui/editor.py:88
+msgid "Digits"
+msgstr "Цифры"
+
+#: src/passwords_app/app/ui/editor.py:89
+msgid "Symbols"
+msgstr "Символы"
+
+#: src/passwords_app/app/ui/editor.py:96
+msgid "Regenerate"
+msgstr "Создать другой"
+
+#: src/passwords_app/app/ui/editor.py:98
+msgid "Use Password"
+msgstr "Использовать пароль"
+
+#: src/passwords_app/app/ui/editor.py:122
+msgid "Easy to type on a phone and accepted by almost every website."
+msgstr "Легко вводить на телефоне, подходит почти для любого веб-сайта."
+
+#: src/passwords_app/app/ui/editor.py:124
+msgid "Lowercase letters are always included."
+msgstr "Строчные буквы используются всегда."
+
+#: src/passwords_app/app/ui/editor.py:155
+#: src/passwords_app/app/ui/item_list.py:190
+msgid "Title"
+msgstr "Название"
+
+#: src/passwords_app/app/ui/editor.py:171
+#: src/passwords_app/app/ui/editor.py:175
+msgid "Generate Password"
+msgstr "Создать пароль"
+
+#: src/passwords_app/app/ui/editor.py:184
+msgid "Paste the setup key or otpauth:// link the website shows."
+msgstr "Вставьте ключ настройки или ссылку otpauth:// с веб-сайта."
+
+#: src/passwords_app/app/ui/editor.py:186
+#: src/passwords_app/app/ui/editor.py:187
+msgid "Setup Key"
+msgstr "Ключ настройки"
+
+#: src/passwords_app/app/ui/editor.py:191
+msgid "Additional Websites"
+msgstr "Другие веб-сайты"
+
+#: src/passwords_app/app/ui/editor.py:194
+#: src/passwords_app/app/ui/editor.py:198
+msgid "Add Website"
+msgstr "Добавить веб-сайт"
+
+#: src/passwords_app/app/ui/editor.py:268
+#: src/passwords_app/app/ui/editor.py:271
+msgid "Remove Website"
+msgstr "Удалить веб-сайт"
+
+#: src/passwords_app/app/ui/item_list.py:71
+msgid "No user name"
+msgstr "Нет имени пользователя"
+
+#: src/passwords_app/app/ui/item_list.py:184
+#: src/passwords_app/app/ui/item_list.py:185
+#: src/passwords_app/app/ui/new_password.py:35
+#: src/passwords_app/app/ui/shortcuts.py:35
+msgid "New Password"
+msgstr "Новый пароль"
+
+#: src/passwords_app/app/ui/item_list.py:192
+msgid "Date Modified"
+msgstr "Дата изменения"
+
+#: src/passwords_app/app/ui/item_list.py:196
+msgid "Sort By"
+msgstr "Сортировка"
+
+#: src/passwords_app/app/ui/item_list.py:200
+#: src/passwords_app/app/ui/item_list.py:202
+msgid "Sort"
+msgstr "Сортировать"
+
+#: src/passwords_app/app/ui/item_list.py:206
+msgid "Review…"
+msgstr "Просмотреть…"
+
+#: src/passwords_app/app/ui/item_list.py:209
+msgid "Sign in to iCloud to keep your passwords in sync"
+msgstr "Войдите в iCloud, чтобы синхронизировать пароли"
+
+#: src/passwords_app/app/ui/item_list.py:210
+#: src/passwords_app/app/ui/preferences.py:137
+#: src/passwords_app/app/ui/sync_status.py:61
+msgid "Sign In…"
+msgstr "Войти…"
+
+#: src/passwords_app/app/ui/item_list.py:214
+msgid "The Passwords background service is not running"
+msgstr "Фоновая служба «Паролей» не запущена"
+
+#: src/passwords_app/app/ui/item_list.py:215
+msgid "Retry"
+msgstr "Повторить"
+
+#: src/passwords_app/app/ui/item_list.py:221
+#: src/passwords_app/app/ui/shortcuts.py:34
+msgid "Search"
+msgstr "Поиск"
+
+#: src/passwords_app/app/ui/item_list.py:228
+msgid "Search passwords"
+msgstr "Поиск паролей"
+
+#: src/passwords_app/app/ui/item_list.py:269
+msgid "Deleted passwords"
+msgstr "Удаленные пароли"
+
+#: src/passwords_app/app/ui/item_list.py:420
+msgid "No Results"
+msgstr "Ничего не найдено"
+
+#: src/passwords_app/app/ui/item_list.py:421
+msgid "Try a different search"
+msgstr "Попробуйте изменить запрос"
+
+#: src/passwords_app/app/ui/item_list.py:424
+msgid "No Deleted Passwords"
+msgstr "Нет удаленных паролей"
+
+#: src/passwords_app/app/ui/item_list.py:427
+#, python-brace-format
+msgid "Passwords you delete stay here for {n} day."
+msgid_plural "Passwords you delete stay here for {n} days."
+msgstr[0] "Удаленные пароли хранятся здесь {n} день."
+msgstr[1] "Удаленные пароли хранятся здесь {n} дня."
+msgstr[2] "Удаленные пароли хранятся здесь {n} дней."
+
+#: src/passwords_app/app/ui/item_list.py:434
+msgid "No Security Recommendations"
+msgstr "Нет рекомендаций по безопасности"
+
+#: src/passwords_app/app/ui/item_list.py:435
+msgid "None of your passwords are weak or reused."
+msgstr "Среди ваших паролей нет слабых и повторяющихся."
+
+#: src/passwords_app/app/ui/item_list.py:438
+msgid "No Verification Codes"
+msgstr "Нет кодов проверки"
+
+#: src/passwords_app/app/ui/item_list.py:440
+msgid "Add a setup key to a password to generate codes for that website."
+msgstr "Добавьте к паролю ключ настройки, чтобы получать коды для этого веб-сайта."
+
+#: src/passwords_app/app/ui/item_list.py:444
+msgid "No Passwords"
+msgstr "Нет паролей"
+
+#: src/passwords_app/app/ui/item_list.py:445
+msgid "Passwords you save will appear here."
+msgstr "Здесь появятся сохраненные пароли."
+
+#: src/passwords_app/app/ui/new_password.py:52
+msgid "A strong password was created for you. It will sync to all your devices."
+msgstr "Для вас создан надежный пароль. Он появится на всех ваших устройствах."
+
+#: src/passwords_app/app/ui/preferences.py:23
+msgid "Never"
+msgstr "Никогда"
+
+#: src/passwords_app/app/ui/preferences.py:26
+#, python-brace-format
+msgid "After {n} minute"
+msgid_plural "After {n} minutes"
+msgstr[0] "Через {n} минуту"
+msgstr[1] "Через {n} минуты"
+msgstr[2] "Через {n} минут"
+
+#: src/passwords_app/app/ui/preferences.py:27
+#, python-brace-format
+msgid "After {n} second"
+msgid_plural "After {n} seconds"
+msgstr[0] "Через {n} секунду"
+msgstr[1] "Через {n} секунды"
+msgstr[2] "Через {n} секунд"
+
+#: src/passwords_app/app/ui/preferences.py:42
+#: src/passwords_app/app/ui/shortcuts.py:37
+#: src/passwords_app/app/ui/window.py:92
+msgid "Preferences"
+msgstr "Настройки"
+
+#: src/passwords_app/app/ui/preferences.py:44
+#: src/passwords_app/app/ui/shortcuts.py:30
+msgid "General"
+msgstr "Основные"
+
+#: src/passwords_app/app/ui/preferences.py:47
+msgid "Clipboard"
+msgstr "Буфер обмена"
+
+#: src/passwords_app/app/ui/preferences.py:48
+msgid "Copied passwords and codes are removed from the clipboard."
+msgstr "Скопированные пароли и коды удаляются из буфера обмена."
+
+#: src/passwords_app/app/ui/preferences.py:55
+msgid "Clear Clipboard"
+msgstr "Очищать буфер обмена"
+
+#: src/passwords_app/app/ui/preferences.py:63
+msgid "Privacy"
+msgstr "Конфиденциальность"
+
+#: src/passwords_app/app/ui/preferences.py:65
+#: src/passwords_app/app/ui/window.py:104
+msgid "Detect Compromised Passwords"
+msgstr "Выявлять скомпрометированные пароли"
+
+#: src/passwords_app/app/ui/preferences.py:67
+msgid "Checks passwords against known data leaks. Only the first 5 characters of each password’s fingerprint leave this computer."
+msgstr "Пароли сверяются с известными утечками данных. За пределы компьютера уходят только первые 5 символов отпечатка каждого пароля."
+
+#: src/passwords_app/app/ui/preferences.py:73
+msgid "Show Website Icons"
+msgstr "Показывать значки веб-сайтов"
+
+#: src/passwords_app/app/ui/preferences.py:75
+msgid "Downloads each website’s icon. When off, nothing is fetched and letters are shown."
+msgstr "Значки загружаются с веб-сайтов. Если выключено, ничего не загружается и показываются буквы."
+
+#: src/passwords_app/app/ui/preferences.py:85
+msgid "App Lock"
+msgstr "Блокировка приложения"
+
+#: src/passwords_app/app/ui/preferences.py:87
+msgid "Lock When Idle"
+msgstr "Блокировать при бездействии"
+
+#: src/passwords_app/app/ui/preferences.py:88
+msgid "Ask for your password or fingerprint after a period without use."
+msgstr "Запрашивать пароль или отпечаток пальца после периода бездействия."
+
+#: src/passwords_app/app/ui/preferences.py:90
+msgid "Unavailable: the Passwords polkit policy is not installed."
+msgstr "Недоступно: политика polkit для «Паролей» не установлена."
+
+#: src/passwords_app/app/ui/preferences.py:97
+msgid "Lock After (Minutes)"
+msgstr "Блокировать через (мин)"
+
+#: src/passwords_app/app/ui/preferences.py:112
+msgid "Deleted Passwords"
+msgstr "Удаленные пароли"
+
+#: src/passwords_app/app/ui/preferences.py:114
+msgid "Keep Deleted Passwords"
+msgstr "Хранить удаленные пароли"
+
+#: src/passwords_app/app/ui/preferences.py:115
+msgid "Passwords deleted here or on another device can be restored."
+msgstr "Пароли, удаленные здесь или на другом устройстве, можно восстановить."
+
+#: src/passwords_app/app/ui/preferences.py:118
+#, python-brace-format
+msgid "{n} day"
+msgid_plural "{n} days"
+msgstr[0] "{n} день"
+msgstr[1] "{n} дня"
+msgstr[2] "{n} дней"
+
+#: src/passwords_app/app/ui/preferences.py:127
+msgid "Account"
+msgstr "Учетная запись"
+
+#: src/passwords_app/app/ui/preferences.py:129
+#: src/passwords_app/app/ui/signin.py:218
+msgid "Apple Account"
+msgstr "Аккаунт Apple"
+
+#: src/passwords_app/app/ui/preferences.py:129
+msgid "Not signed in"
+msgstr "Вход не выполнен"
+
+#: src/passwords_app/app/ui/preferences.py:133
+msgid "Sign Out…"
+msgstr "Выйти…"
+
+#: src/passwords_app/app/ui/shortcuts.py:31
+msgid "Selected Password"
+msgstr "Выбранный пароль"
+
+#: src/passwords_app/app/ui/shortcuts.py:32
+#: src/passwords_app/app/ui/shortcuts.py:78
+msgid "Navigation"
+msgstr "Навигация"
+
+#: src/passwords_app/app/ui/shortcuts.py:36
+#: src/passwords_app/app/ui/sync_status.py:55
+msgid "Sync Now"
+msgstr "Синхронизировать"
+
+#: src/passwords_app/app/ui/shortcuts.py:38
+#: src/passwords_app/app/ui/window.py:93
+msgid "Keyboard Shortcuts"
+msgstr "Сочетания клавиш"
+
+#: src/passwords_app/app/ui/shortcuts.py:39
+msgid "Quit"
+msgstr "Завершить"
+
+#: src/passwords_app/app/ui/shortcuts.py:43
+msgid "Show or Hide Password"
+msgstr "Показать или скрыть пароль"
+
+#: src/passwords_app/app/ui/shortcuts.py:45
+msgid "Save Changes"
+msgstr "Сохранить изменения"
+
+#: src/passwords_app/app/ui/shortcuts.py:46
+msgid "Cancel Editing"
+msgstr "Отменить изменения"
+
+#: src/passwords_app/app/ui/shortcuts.py:47
+msgid "Delete"
+msgstr "Удалить"
+
+#: src/passwords_app/app/ui/shortcuts.py:48
+msgid "Undo Delete"
+msgstr "Отменить удаление"
+
+#: src/passwords_app/app/ui/shortcuts.py:49
+msgid "All Passwords"
+msgstr "Все пароли"
+
+#: src/passwords_app/app/ui/shortcuts.py:79
+msgid "Move Between Items"
+msgstr "Переход между элементами"
+
+#: src/passwords_app/app/ui/shortcuts.py:80
+msgid "Next Pane"
+msgstr "Следующая панель"
+
+#: src/passwords_app/app/ui/shortcuts.py:81
+msgid "Back"
+msgstr "Назад"
+
+#: src/passwords_app/app/ui/sidebar.py:55
+#, python-brace-format
+msgid "{title}, {n} recommendation"
+msgid_plural "{title}, {n} recommendations"
+msgstr[0] "{title}, {n} рекомендация"
+msgstr[1] "{title}, {n} рекомендации"
+msgstr[2] "{title}, {n} рекомендаций"
+
+#: src/passwords_app/app/ui/sidebar.py:58
+#, python-brace-format
+msgid "{title}, {n} item"
+msgid_plural "{title}, {n} items"
+msgstr[0] "{title}, {n} элемент"
+msgstr[1] "{title}, {n} элемента"
+msgstr[2] "{title}, {n} элементов"
+
+#: src/passwords_app/app/ui/sidebar.py:79
+msgid "Sections"
+msgstr "Разделы"
+
+#: src/passwords_app/app/ui/sidebar.py:106
+msgid "Shared Groups"
+msgstr "Общие группы"
+
+#: src/passwords_app/app/ui/signin.py:101
+#, python-brace-format
+msgid "Digit {n} of {total}"
+msgstr "Цифра {n} из {total}"
+
+#: src/passwords_app/app/ui/signin.py:192
+#: src/passwords_app/app/ui/signin.py:234
+msgid "Sign In"
+msgstr "Войти"
+
+#: src/passwords_app/app/ui/signin.py:212
+msgid "Sign in with your Apple Account"
+msgstr "Вход с Аккаунтом Apple"
+
+#: src/passwords_app/app/ui/signin.py:213
+msgid "Your passwords stay end-to-end encrypted. This computer talks only to Apple."
+msgstr "Пароли остаются защищены сквозным шифрованием. Этот компьютер связывается только с Apple."
+
+#: src/passwords_app/app/ui/signin.py:217
+msgid "Email or Phone Number"
+msgstr "Эл. почта или номер телефона"
+
+#: src/passwords_app/app/ui/signin.py:230
+#: src/passwords_app/app/ui/signin.py:402
+msgid "Continue"
+msgstr "Продолжить"
+
+#: src/passwords_app/app/ui/signin.py:244
+msgid "Enter your Apple Account and password."
+msgstr "Введите Аккаунт Apple и пароль."
+
+#: src/passwords_app/app/ui/signin.py:254
+msgid "Could not sign in."
+msgstr "Не удалось войти."
+
+#: src/passwords_app/app/ui/signin.py:273
+msgid "Enter the code sent by text message to your trusted phone number."
+msgstr "Введите код из SMS, отправленного на ваш доверенный номер телефона."
+
+#: src/passwords_app/app/ui/signin.py:275
+msgid "Enter the code shown on one of your Apple devices."
+msgstr "Введите код, показанный на одном из ваших устройств Apple."
+
+#: src/passwords_app/app/ui/signin.py:283
+msgid "Two-Factor Authentication"
+msgstr "Двухфакторная аутентификация"
+
+#: src/passwords_app/app/ui/signin.py:292
+msgid "Didn’t get a code? Text me"
+msgstr "Не пришел код? Отправить SMS"
+
+#: src/passwords_app/app/ui/signin.py:311
+msgid "That code is not correct. Try again."
+msgstr "Неверный код. Попробуйте еще раз."
+
+#: src/passwords_app/app/ui/signin.py:350
+msgid "Confirm with a Device Passcode"
+msgstr "Подтверждение код-паролем устройства"
+
+#: src/passwords_app/app/ui/signin.py:352
+msgid "Apple keeps your keychain keys sealed with the screen passcode of each of your devices. Entering the passcode of one of them lets this computer join your iCloud Keychain."
+msgstr "Apple хранит ключи вашей связки ключей запертыми код-паролем экрана каждого вашего устройства. Введите код-пароль одного из них, чтобы подключить этот компьютер к Связке ключей iCloud."
+
+#: src/passwords_app/app/ui/signin.py:358
+msgid "Choose a Device"
+msgstr "Выберите устройство"
+
+#: src/passwords_app/app/ui/signin.py:372
+#, python-brace-format
+msgid "{model} · Serial {serial}"
+msgstr "{model} · Серийный номер {serial}"
+
+#: src/passwords_app/app/ui/signin.py:388
+msgid "Type carefully"
+msgstr "Вводите внимательно"
+
+#: src/passwords_app/app/ui/signin.py:390
+msgid "Apple allows about 10 wrong attempts per device. After that, that device’s copy of your keychain keys is destroyed and it can no longer be used here."
+msgstr "Apple допускает около 10 неверных попыток для каждого устройства. После этого копия ключей связки на этом устройстве уничтожается, и его больше нельзя использовать здесь."
+
+#: src/passwords_app/app/ui/signin.py:405
+#: src/passwords_app/app/ui/signin.py:429
+#: src/passwords_app/app/ui/signin.py:430
+#: src/passwords_app/app/ui/signin.py:438
+msgid "Device Passcode"
+msgstr "Код-пароль устройства"
+
+#: src/passwords_app/app/ui/signin.py:424
+#, python-brace-format
+msgid "Enter the Passcode of “{device}”"
+msgstr "Введите код-пароль устройства «{device}»"
+
+#: src/passwords_app/app/ui/signin.py:425
+msgid "This is the passcode you use to unlock that device."
+msgstr "Это код-пароль, которым вы разблокируете это устройство."
+
+#: src/passwords_app/app/ui/signin.py:436
+msgid "Join iCloud Keychain"
+msgstr "Подключить к Связке ключей iCloud"
+
+#: src/passwords_app/app/ui/signin.py:452
+msgid "Joining your iCloud Keychain…"
+msgstr "Подключение к Связке ключей iCloud…"
+
+#: src/passwords_app/app/ui/signin.py:455
+msgid "This can take a minute."
+msgstr "Это может занять около минуты."
+
+#: src/passwords_app/app/ui/signin.py:458
+msgid "Joining"
+msgstr "Подключение"
+
+#: src/passwords_app/app/ui/signin.py:470
+msgid "Could not join."
+msgstr "Не удалось подключиться."
+
+#: src/passwords_app/app/ui/signin.py:483
+msgid "This Computer Is Ready"
+msgstr "Компьютер готов"
+
+#: src/passwords_app/app/ui/signin.py:484
+msgid "Your passwords now sync between this computer and your Apple devices."
+msgstr "Теперь пароли синхронизируются между этим компьютером и вашими устройствами Apple."
+
+#: src/passwords_app/app/ui/signin.py:486
+#: src/passwords_app/app/ui/signin.py:491
+msgid "Done"
+msgstr "Готово"
+
+#: src/passwords_app/app/ui/signin.py:497
+msgid "Could Not Continue"
+msgstr "Не удалось продолжить"
+
+#: src/passwords_app/app/ui/signin.py:501
+msgid "Error"
+msgstr "Ошибка"
+
+#: src/passwords_app/app/ui/sync_status.py:97
+#, python-brace-format
+msgid "Sync status: {status}"
+msgstr "Состояние синхронизации: {status}"
+
+#: src/passwords_app/app/ui/sync_status.py:110
+#, python-brace-format
+msgid "Apple Account: {apple_id}"
+msgstr "Аккаунт Apple: {apple_id}"
+
+#: src/passwords_app/app/ui/sync_status.py:115
+#, python-brace-format
+msgid "{passwords} · {n} deleted"
+msgid_plural "{passwords} · {n} deleted"
+msgstr[0] "{passwords} · {n} удаленный"
+msgstr[1] "{passwords} · {n} удаленных"
+msgstr[2] "{passwords} · {n} удаленных"
+
+#: src/passwords_app/app/ui/widgets.py:92
+msgid "Time left for this code"
+msgstr "Время действия кода"
+
+#: src/passwords_app/app/ui/widgets.py:163
+#: src/passwords_app/app/ui/widgets.py:166
+#, python-brace-format
+msgid "Password strength: {level}"
+msgstr "Надежность пароля: {level}"
+
+#: src/passwords_app/app/ui/window.py:94
+msgid "About Passwords"
+msgstr "О приложении «Пароли»"
+
+#: src/passwords_app/app/ui/window.py:99 src/passwords_app/app/ui/window.py:101
+msgid "Main Menu"
+msgstr "Главное меню"
+
+#: src/passwords_app/app/ui/window.py:105
+msgid "Only the first 5 characters of a password’s fingerprint are sent."
+msgstr "Отправляются только первые 5 символов отпечатка пароля."
+
+#: src/passwords_app/app/ui/window.py:154
+msgid "Unlock"
+msgstr "Разблокировать"
+
+#: src/passwords_app/app/ui/window.py:160
+msgid "Passwords Is Locked"
+msgstr "«Пароли» заблокированы"
+
+#: src/passwords_app/app/ui/window.py:161
+#: src/passwords_app/app/ui/window.py:338
+msgid "Unlock with your password or fingerprint."
+msgstr "Разблокируйте паролем или отпечатком пальца."
+
+#: src/passwords_app/app/ui/window.py:336
+msgid "Not unlocked. Try again."
+msgstr "Не удалось разблокировать. Попробуйте еще раз."
+
+#: src/passwords_app/app/ui/window.py:352
+msgid "Undo"
+msgstr "Отменить"
+
+#: src/passwords_app/app/ui/window.py:364
+msgid "Could not open the website"
+msgstr "Не удалось открыть веб-сайт"
+
+#: src/passwords_app/app/ui/window.py:380
+#, python-brace-format
+msgid "Deleted “{title}”"
+msgstr "Пароль «{title}» удален"
+
+#: src/passwords_app/app/ui/window.py:387
+msgid "Saved"
+msgstr "Сохранено"
+
+#: src/passwords_app/app/ui/window.py:395
+msgid "Restored"
+msgstr "Восстановлено"
+
+#: src/passwords_app/app/ui/window.py:403
+msgid "Delete Permanently?"
+msgstr "Удалить навсегда?"
+
+#: src/passwords_app/app/ui/window.py:404
+msgid "This password will be deleted from this computer and cannot be restored."
+msgstr "Пароль будет удален с этого компьютера без возможности восстановления."
+
+#: src/passwords_app/app/ui/window.py:420
+msgid "Deleted permanently"
+msgstr "Удалено навсегда"
+
+#: src/passwords_app/app/ui/window.py:569
+msgid "Password saved"
+msgstr "Пароль сохранен"
+
+#: src/passwords_app/app/ui/window.py:615
+msgid "So many deletions at once may be a mistake, so nothing was deleted yet. Apply the deletions everywhere, or restore these passwords on both sides."
+msgstr "Столько удалений сразу может быть ошибкой, поэтому пока ничего не удалено. Примените удаления везде или восстановите эти пароли на обеих сторонах."
+
+#: src/passwords_app/app/ui/window.py:619
+msgid "Decide Later"
+msgstr "Решить позже"
+
+#: src/passwords_app/app/ui/window.py:620
+msgid "Restore Them"
+msgstr "Восстановить"
+
+#: src/passwords_app/app/ui/window.py:621
+msgid "Apply Deletions"
+msgstr "Применить удаления"
+
+#: src/passwords_app/app/ui/window.py:639
+msgid "Deletions applied"
+msgstr "Удаления применены"
+
+#: src/passwords_app/app/ui/window.py:639
+msgid "Passwords restored"
+msgstr "Пароли восстановлены"
+
+#: src/passwords_app/app/ui/window.py:656
+msgid "Signed in. Syncing…"
+msgstr "Вход выполнен. Синхронизация…"
+
+#: src/passwords_app/app/validation.py:54
+msgid "Enter a website"
+msgstr "Введите веб-сайт"
+
+#: src/passwords_app/app/validation.py:57
+#: src/passwords_app/app/validation.py:64
+msgid "Use a web address such as example.com"
+msgstr "Укажите веб-адрес, например example.com"
+
+#: src/passwords_app/app/validation.py:61
+msgid "This is not a valid web address"
+msgstr "Недопустимый веб-адрес"
+
+#: src/passwords_app/app/validation.py:72
+msgid "A setup key contains only letters A–Z and digits 2–7"
+msgstr "Ключ настройки содержит только буквы A–Z и цифры 2–7"
+
+#: src/passwords_app/app/validation.py:78
+msgid "This setup key is incomplete"
+msgstr "Ключ настройки неполный"
+
+#: src/passwords_app/app/validation.py:80
+msgid "This setup key is too short"
+msgstr "Ключ настройки слишком короткий"
+
+#: src/passwords_app/app/validation.py:96
+msgid "This verification code link is not valid"
+msgstr "Недопустимая ссылка кода проверки"
+
+#: src/passwords_app/app/validation.py:108
+#, python-brace-format
+msgid "Passwords are limited to {n} character"
+msgid_plural "Passwords are limited to {n} characters"
+msgstr[0] "Пароль — не более {n} символа"
+msgstr[1] "Пароль — не более {n} символов"
+msgstr[2] "Пароль — не более {n} символов"
+
+#: src/passwords_app/app/validation.py:111
+#, python-brace-format
+msgid "User names are limited to {n} character"
+msgid_plural "User names are limited to {n} characters"
+msgstr[0] "Имя пользователя — не более {n} символа"
+msgstr[1] "Имя пользователя — не более {n} символов"
+msgstr[2] "Имя пользователя — не более {n} символов"
+
+#: src/passwords_app/app/validation.py:114
+#, python-brace-format
+msgid "Titles are limited to {n} character"
+msgid_plural "Titles are limited to {n} characters"
+msgstr[0] "Название — не более {n} символа"
+msgstr[1] "Название — не более {n} символов"
+msgstr[2] "Название — не более {n} символов"
+
+#: src/passwords_app/app/validation.py:117
+#, python-brace-format
+msgid "Notes are limited to {n} character"
+msgid_plural "Notes are limited to {n} characters"
+msgstr[0] "Заметки — не более {n} символа"
+msgstr[1] "Заметки — не более {n} символов"
+msgstr[2] "Заметки — не более {n} символов"
+
+#: src/passwords_app/app/validation.py:132
+#, python-brace-format
+msgid "“{url}” is not a valid web address"
+msgstr "«{url}» — недопустимый веб-адрес"
+
+#: src/passwords_app/app/validation.py:148
+msgid "Enter a password"
+msgstr "Введите пароль"
+
+#: src/passwords_app/app/validation.py:166
+msgid "Contains a character that cannot be saved"
+msgstr "Содержит символ, который нельзя сохранить"
+
+#: src/passwords_app/app/vault.py:285
+msgid "Could not check passwords against known data leaks"
+msgstr "Не удалось сверить пароли с известными утечками данных"
