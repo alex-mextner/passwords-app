@@ -51,7 +51,9 @@ class RecordTransport(Protocol):
         self, saves: Sequence[tuple[ckks.CloudKitRecord, bool]]
     ) -> list[CloudKitResult]: ...
 
-    def delete_records(self, names: Sequence[tuple[str, ckks.ZoneId]]) -> list[CloudKitResult]: ...
+    def delete_records(
+        self, deletes: Sequence[tuple[str, ckks.ZoneId, str | None]]
+    ) -> list[CloudKitResult]: ...
 
 
 RecoverableKeys = tuple[dict[str, bytes], list[ckks.CloudKitRecord]]
@@ -257,9 +259,9 @@ class KeychainClient:
 
     def delete(self, item_id: str, etag: str | None) -> None:
         """Delete a login and its sidecar together; `etag` None deletes whatever is there."""
-        # Unlike a save, the delete request carries no change tag the server could check, so
-        # the version is compared against a fresh read; only an edit landing in the round trip
-        # between that read and the delete can still slip through.
+        # The fresh read finds a sidecar added on another device since the last fetch, which
+        # no change tag in the batch could guard; each delete then carries the tag it was
+        # read with, so an edit landing in the round trip fails the batch instead.
         logins = self.fetch()
         state = self._cache.get(self.zone)
         existing = logins.get(item_id)
@@ -268,12 +270,12 @@ class KeychainClient:
         if etag is not None and existing.etag != etag:
             msg = f"login {item_id} changed since it was read"
             raise RecordConflictError(msg)
-        names = [(existing.item.record_name, self.zone)]
-        if existing.sidecar is not None:
-            names.append((existing.sidecar.record_name, self.zone))
-        _check(self._transport.delete_records(names), "deleting the login")
-        for name, _ in names:
-            state.records.pop(name, None)
+        records = [existing.item] if existing.sidecar is None else [existing.item, existing.sidecar]
+        guard = etag is not None
+        deletes = [(r.record_name, self.zone, r.etag if guard else None) for r in records]
+        _check(self._transport.delete_records(deletes), "deleting the login")
+        for rec in records:
+            state.records.pop(rec.record_name, None)
         self._cache.save()
 
 

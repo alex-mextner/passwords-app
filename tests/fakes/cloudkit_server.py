@@ -3,9 +3,10 @@
 """A local CloudKit gateway holding a real, encrypted keychain `Passwords` zone.
 
 `FakeCloudKit` speaks the same protobuf framing as Apple's gateway for the calls the client
-makes: ckAppInit, record/sync (incremental, paged, with deletion entries), record/save
-(zone-atomic, conditional on the change tag), record/delete, and the Cuttlefish
-`fetchRecoverableTLKShares` invoke. Its records are made with the client's own encoder and
+makes: ckAppInit, record/sync (incremental, paged, with deletion entries), record/save and
+record/delete (zone-atomic, conditional on the change tag the request carries, never the one
+inside the record, which Apple ignores), and the Cuttlefish `fetchRecoverableTLKShares`
+invoke. Its records are made with the client's own encoder and
 test-generated keys: a TLK, classA/classC keys wrapped by it, `currentkey` pointers, and a
 TLK share ECIES-encrypted to each peer the test adds. Every saved item is decrypted on
 arrival, so a record the client encrypts wrongly is refused like Apple would refuse it.
@@ -386,22 +387,15 @@ class FakeCloudKit:
         errors: list[tuple[int, str] | None] = []
         records: list[ckks.CloudKitRecord] = []
         for i, op in enumerate(ops):
-            rec, create = ckks.parse_save_request(op.payload(ckks.FIELD_RECORD_SAVE) or b"")
+            rec, create, if_match = ckks.parse_save_request(
+                op.payload(ckks.FIELD_RECORD_SAVE) or b""
+            )
             records.append(rec)
-            errors.append(self._check_save(rec, create))
+            errors.append(self._check_save(rec, create=create, if_match=if_match))
             if fault is not None and fault.client_error is not None and i == len(ops) - 1:
                 errors[-1] = (fault.client_error, "injected")
         if any(errors):
-            return [
-                cloudkit.build_response_operation(
-                    op.uuid,
-                    op.op_type,
-                    code=3,
-                    client_error=err[0] if err else cloudkit.CLIENT_ATOMIC_FAILURE,
-                    description=err[1] if err else "batch failed",
-                )
-                for op, err in zip(ops, errors, strict=True)
-            ]
+            return _failed_batch(ops, errors)
         out: list[bytes] = []
         for op, rec in zip(ops, records, strict=True):
             assert rec.zone is not None
@@ -416,15 +410,19 @@ class FakeCloudKit:
             )
         return out
 
-    def _check_save(self, rec: ckks.CloudKitRecord, create: bool) -> tuple[int, str] | None:
+    def _check_save(
+        self, rec: ckks.CloudKitRecord, *, create: bool, if_match: str | None
+    ) -> tuple[int, str] | None:
+        """Apple's checks: the tag in the request (never the record's own) guards an update."""
         zone = self._zones.get(rec.zone) if rec.zone is not None else None
         if zone is None:
             return cloudkit.CLIENT_ZONE_NOT_FOUND, "no such zone"
         current = zone.records.get(rec.record_name)
         if create and current is not None:
-            return cloudkit.CLIENT_EXISTS, "record exists"
-        if not create and (current is None or current.etag != rec.etag):
-            return cloudkit.CLIENT_OP_LOCK_FAILURE, "record changed"
+            return cloudkit.CLIENT_OP_LOCK_FAILURE, "record to insert already exists"
+        stale = current is None or (if_match is not None and current.etag != if_match)
+        if not create and stale:
+            return cloudkit.CLIENT_OP_LOCK_FAILURE, "client oplock error updating record"
         try:
             pipeline.decrypt_item(rec, self.keyring())
         except kc.KeychainCryptoError as e:
@@ -443,15 +441,28 @@ class FakeCloudKit:
                 )
                 for op in ops
             ]
-        out: list[bytes] = []
+        targets: list[tuple[str, _Zone | None]] = []
+        errors: list[tuple[int, str] | None] = []
         for op in ops:
-            name, zone_id = ckks.parse_delete_request(op.payload(ckks.FIELD_RECORD_DELETE) or b"")
+            name, zone_id, if_match = ckks.parse_delete_request(
+                op.payload(ckks.FIELD_RECORD_DELETE) or b""
+            )
             zone = self._zones.get(zone_id) if zone_id is not None else None
+            current = zone.records.get(name) if zone is not None else None
+            stale = current is not None and if_match is not None and current.etag != if_match
+            errors.append(
+                (cloudkit.CLIENT_OP_LOCK_FAILURE, "client oplock error deleting record")
+                if stale
+                else None
+            )
+            targets.append((name, zone))
+        if any(errors):
+            return _failed_batch(ops, errors)
+        for name, zone in targets:
             if zone is not None and zone.records.pop(name, None) is not None:
                 self._seq += 1
                 zone.log.append((self._seq, name))
-            out.append(cloudkit.build_response_operation(op.uuid, op.op_type))
-        return out
+        return [cloudkit.build_response_operation(op.uuid, op.op_type) for op in ops]
 
     def _invoke(self, op: cloudkit.ParsedRequest) -> bytes:
         # fetchRecoverableTLKShares: this zone's TLK travels as a plain tlkshare record instead.
@@ -459,6 +470,22 @@ class FakeCloudKit:
         return cloudkit.build_response_operation(
             op.uuid, op.op_type, field=cloudkit.OP_TYPE_FUNCTION_INVOKE, payload=payload
         )
+
+
+def _failed_batch(
+    ops: list[cloudkit.ParsedRequest], errors: list[tuple[int, str] | None]
+) -> list[bytes]:
+    """A zone-atomic batch that failed: each culprit gets its error, the rest ATOMIC_FAILURE."""
+    return [
+        cloudkit.build_response_operation(
+            op.uuid,
+            op.op_type,
+            code=3,
+            client_error=err[0] if err else cloudkit.CLIENT_ATOMIC_FAILURE,
+            description=err[1] if err else "Atomic failure",
+        )
+        for op, err in zip(ops, errors, strict=True)
+    ]
 
 
 def _handler(fake: FakeCloudKit) -> type[BaseHTTPRequestHandler]:

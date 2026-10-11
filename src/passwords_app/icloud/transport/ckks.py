@@ -429,34 +429,43 @@ def _change_name(name: str, record: CloudKitRecord | None) -> str:
 
 
 def build_save_request(record: CloudKitRecord, *, create: bool) -> bytes:
-    """RecordSaveRequest: a create, or an update conditional on the record's change tag."""
+    """RecordSaveRequest: a create, or an update conditional on the record's change tag.
+
+    The condition is the request's own field 4: Apple ignores the tag inside the record
+    (Record field 1) and would overwrite a newer version. A stale tag fails the update with
+    client error 15 (oplock), and so does creating a record that already exists.
+    """
     return (
         Writer()
         .message(1, encode_record(record))
+        .string(4, None if create else record.etag)
         .uint64(6, SAVE_CREATE if create else SAVE_UPDATE)
         .finish()
     )
 
 
-def parse_save_request(raw: bytes) -> tuple[CloudKitRecord, bool]:
+def parse_save_request(raw: bytes) -> tuple[CloudKitRecord, bool, str | None]:
+    """Return a save request's record, whether it creates, and the tag it is conditional on."""
     f = decode_fields(raw)
     rec = first_bytes(f, 1)
     if rec is None:
         msg = "save request without a record"
         raise ValueError(msg)
-    return parse_record(rec), first_int(f, 6) == SAVE_CREATE
+    return parse_record(rec), first_int(f, 6) == SAVE_CREATE, first_str(f, 4)
 
 
-def build_delete_request(record_name: str, zone: ZoneId) -> bytes:
-    return Writer().message(1, record_identifier(record_name, zone)).finish()
+def build_delete_request(record_name: str, zone: ZoneId, etag: str | None) -> bytes:
+    """RecordDeleteRequest, conditional (field 2) on `etag` unless it is None."""
+    return Writer().message(1, record_identifier(record_name, zone)).string(2, etag).finish()
 
 
-def parse_delete_request(raw: bytes) -> tuple[str, ZoneId | None]:
-    rid = first_bytes(decode_fields(raw), 1)
+def parse_delete_request(raw: bytes) -> tuple[str, ZoneId | None, str | None]:
+    f = decode_fields(raw)
+    rid = first_bytes(f, 1)
     if rid is None:
         msg = "delete request without a record id"
         raise ValueError(msg)
-    return _parse_record_id(rid)
+    return (*_parse_record_id(rid), first_str(f, 2))
 
 
 def parse_save_response(raw: bytes) -> str | None:
