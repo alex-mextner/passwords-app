@@ -9,7 +9,7 @@ from typing import TYPE_CHECKING
 
 from tests.browser.e2e_support import FABRIKAM
 from tests.e2e.browsers import fill, sign_up_and_save
-from tests.e2e.proof import Video, capture_app, capture_page
+from tests.e2e.proof import Video, capture_app, capture_page, overlay_shot
 from tests.e2e.stack import pump, wait_until
 
 if TYPE_CHECKING:
@@ -25,7 +25,8 @@ def test_s10_firefox_save_reaches_icloud_keyring_and_app(stack: Stack, site: Sit
     app = stack.app
     video = Video(SCENARIO, stack.root / "video")
     firefox = video.browser(stack.firefox)
-    sign_up_and_save(firefox, site.url(FABRIKAM), USER, NEW_SECRET)
+    shot = overlay_shot(stack.firefox, SCENARIO, "save-prompt", firefox)
+    sign_up_and_save(firefox, site.url(FABRIKAM), USER, NEW_SECRET, at_prompt=shot)
     firefox.hold(1.5)
     capture_page(stack.firefox, SCENARIO)
 

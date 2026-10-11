@@ -115,6 +115,10 @@ class AppWindow:
         rows = page.trash_filtered
         return [rows.get_item(i).entry.item.display_title for i in range(rows.get_n_items())]
 
+    def list_view_shown(self) -> str:
+        """What the list pane shows: "items", "trash", "empty" or "loading" (the spinner)."""
+        return str(self.window.list_page.stack.get_visible_child_name())
+
     def status_title(self) -> str:
         return str(self.window.status_button.content.get_label())
 
@@ -222,7 +226,10 @@ class AppWindow:
         wait_until(banner.get_revealed, what="pause banner")
         self.window.activate_action("win.review-pause", None)
         dialog = wait_until(lambda: self.window.pause_dialog, what="pause dialog")
-        dialog.emit("response", response)
+        # Click the dialog's button (emitting "response" alone would leave the dialog open).
+        label = dialog.get_response_label(response)
+        button = wait_until(lambda: self._button(dialog, label), what=f"{label!r} button")
+        button.emit("clicked")
         expected = "Deletions applied" if response == "apply" else "Passwords restored"
         wait_until(self._toast(expected), what=f"{expected!r} toast", timeout=60)
 

@@ -9,7 +9,7 @@ from typing import TYPE_CHECKING
 
 from tests.browser.e2e_support import FABRIKAM, NORTHWIND
 from tests.e2e.browsers import sign_up_and_save
-from tests.e2e.proof import capture_app, capture_page
+from tests.e2e.proof import capture_app, capture_page, overlay_shot
 from tests.e2e.stack import wait_until
 
 if TYPE_CHECKING:
@@ -24,7 +24,8 @@ USER = "chrome.user@example.com"
 
 def test_s11_chromium_save_reaches_icloud_keyring_and_app(stack: Stack, site: SiteServer) -> None:
     app = stack.app
-    sign_up_and_save(stack.chromium, site.url(FABRIKAM), USER, NEW_SECRET)
+    shot = overlay_shot(stack.chromium, SCENARIO, "save-prompt")
+    sign_up_and_save(stack.chromium, site.url(FABRIKAM), USER, NEW_SECRET, at_prompt=shot)
     capture_page(stack.chromium, SCENARIO)
     url = site.origin(FABRIKAM)
     on_phone = wait_until(lambda: stack.apple.find(url, USER), what="the login in iCloud")

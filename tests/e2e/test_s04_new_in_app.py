@@ -9,7 +9,7 @@ from typing import TYPE_CHECKING
 
 from tests.browser.e2e_support import FABRIKAM
 from tests.e2e.browsers import fill
-from tests.e2e.proof import capture_app, capture_page, dropdown_shot
+from tests.e2e.proof import capture_app, capture_page, overlay_shot
 from tests.e2e.stack import wait_until
 
 if TYPE_CHECKING:
@@ -37,7 +37,7 @@ def test_s04_new_in_app_reaches_icloud_keyring_and_browsers(stack: Stack, site: 
     wait_until(lambda: app.detail_shows(on_phone.id, password=NEW_SECRET), what="app detail")
     capture_app(app, SCENARIO)
     for browser in (stack.firefox, stack.chromium):
-        shot = dropdown_shot(browser, SCENARIO)
+        shot = overlay_shot(browser, SCENARIO, "dropdown")
         assert fill(browser, site.url(FABRIKAM), at_dropdown=shot) == (
             "lee.park@example.com",
             NEW_SECRET,

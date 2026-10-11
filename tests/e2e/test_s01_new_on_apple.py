@@ -9,7 +9,7 @@ from typing import TYPE_CHECKING
 from tests.browser.e2e_support import FABRIKAM
 from tests.e2e.apple import login
 from tests.e2e.browsers import fill
-from tests.e2e.proof import Video, capture_app, capture_page, dropdown_shot
+from tests.e2e.proof import Video, capture_app, capture_page, overlay_shot
 from tests.e2e.stack import pump, wait_until
 
 if TYPE_CHECKING:
@@ -50,7 +50,7 @@ def test_s01_new_on_apple_reaches_keyring_app_and_both_browsers(
 
     for browser in (stack.firefox, stack.chromium):
         page = video.browser(browser)
-        shot = dropdown_shot(browser, SCENARIO, page)
+        shot = overlay_shot(browser, SCENARIO, "dropdown", page)
         assert fill(page, site.url(FABRIKAM), at_dropdown=shot) == (cred.username, cred.password)
         capture_page(browser, SCENARIO)
         video.end_browser(page)

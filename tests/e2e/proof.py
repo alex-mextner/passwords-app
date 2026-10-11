@@ -126,13 +126,14 @@ class Video:
         return out
 
 
-def dropdown_shot(
-    browser: Page, scenario: str, recorder: FrameRecorder | None = None
+def overlay_shot(
+    browser: Page, scenario: str, overlay: str, recorder: FrameRecorder | None = None
 ) -> Callable[[], None]:
-    """For `fill(at_dropdown=…)`: capture the extension's dropdown (and hold it in a video)."""
+    """For `fill(at_dropdown=…)` / `sign_up_and_save(at_prompt=…)`: capture the extension's
+    `overlay` ("dropdown", "save-prompt") and hold it in the video."""
 
     def shoot() -> None:
-        capture_page(browser, f"{scenario}-dropdown")
+        capture_page(browser, f"{scenario}-{overlay}")
         if recorder is not None:
             recorder.hold(1.8)
 

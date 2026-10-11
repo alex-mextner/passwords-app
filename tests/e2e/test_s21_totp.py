@@ -12,7 +12,7 @@ from tests.browser.e2e_support import FABRIKAM
 from tests.e2e.apple import login
 from tests.e2e.browsers import fill_code
 from tests.e2e.data import OTP_SECRET, current_codes
-from tests.e2e.proof import capture_app, capture_page, dropdown_shot
+from tests.e2e.proof import capture_app, capture_page, overlay_shot
 from tests.e2e.stack import wait_until
 
 if TYPE_CHECKING:
@@ -52,7 +52,7 @@ def test_s21_code_from_iphone_shown_in_app_and_filled_in_browsers(
     capture_app(app, SCENARIO)
 
     for browser in (stack.firefox, stack.chromium):
-        shot = dropdown_shot(browser, SCENARIO)
+        shot = overlay_shot(browser, SCENARIO, "dropdown")
         assert fill_code(browser, site.url(FABRIKAM, "/otp.html"), at_dropdown=shot) in (
             current_codes(otpauth)
         )

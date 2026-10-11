@@ -50,8 +50,16 @@ def fill_code(page: Page, url: str, *, at_dropdown: Callable[[], None] | None = 
     return "".join(value(page, f"#d{i}") for i in range(1, 7))
 
 
-def sign_up_and_save(page: Page, url: str, username: str, password: str) -> None:
-    """Log in with a new login, then accept the extension's "Save password?" prompt."""
+def sign_up_and_save(
+    page: Page,
+    url: str,
+    username: str,
+    password: str,
+    *,
+    at_prompt: Callable[[], None] | None = None,
+) -> None:
+    """Log in with a new login, then accept the extension's "Save password?" prompt.
+    `at_prompt` runs while the prompt shows."""
     page.goto(url)
     page.type("#email", username)
     page.type("#password", password)
@@ -61,6 +69,8 @@ def sign_up_and_save(page: Page, url: str, username: str, password: str) -> None
         what=f"welcome page in {page.name}",
     )
     rect = wait_overlay(page, "save-prompt", timeout=30)
+    if at_prompt is not None:
+        at_prompt()
     # The prompt's primary button sits at the card's bottom right; a real mouse click.
     page.click_at(rect["x"] + rect["width"] - 40, rect["y"] + rect["height"] - 26)
     wait_until(
