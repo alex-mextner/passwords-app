@@ -70,8 +70,8 @@ def test_s12_newer_edit_wins_and_the_other_is_kept(stack: Stack, newer: str) -> 
 
 @pytest.mark.xfail(
     strict=True,
-    raises=SurfaceTimeoutError,
-    reason="#66: restoring a login whose site and username exist halts uploads to iCloud",
+    raises=(SurfaceTimeoutError, AssertionError),
+    reason="#66: restoring a login whose site and username exist leaves sync 'offline'",
 )
 def test_s12_restoring_the_conflict_loser_reaches_icloud(stack: Stack) -> None:
     seeded = stack.seeded["contoso"]

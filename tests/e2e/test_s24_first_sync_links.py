@@ -6,12 +6,17 @@ signing in) to the same logins in iCloud instead of duplicating them; the rest i
 from __future__ import annotations
 
 from typing import TYPE_CHECKING
+from urllib.parse import urlsplit
 
 import pytest
 from tests.e2e.stack import wait_until
 
 if TYPE_CHECKING:
     from tests.e2e.stack import Stack
+
+
+def _login_key(url: str, username: str) -> tuple[str | None, str]:
+    return urlsplit(url).hostname, username
 
 
 @pytest.mark.stack(signed_in=False, daemon=True)
@@ -42,6 +47,11 @@ def test_s24_first_sync_links_existing_seahorse_items(stack: Stack) -> None:
     assert len(stack.keyring.items()) == len(stack.seeded) + 1
     assert len(stack.apple.logins()) == len(stack.seeded) + 1
     assert all(i.id for i in stack.keyring.items())
-    assert stack.daemon.trash() == []
+    # A Seahorse entry has no title or notes, so the fuller iCloud record wins the link and
+    # the keyring version is kept in Recently Deleted instead of being dropped.
+    trash = stack.daemon.trash()
+    assert {e["reason"] for e in trash} <= {"conflict"}
+    linked = {_login_key(c.url, c.username) for c in (northwind, stack.seeded["contoso"])}
+    assert {_login_key(e["item"]["url"], e["item"]["username"]) for e in trash} <= linked
     app = stack.app
     assert len(app.items()) == len(stack.seeded) + 1
