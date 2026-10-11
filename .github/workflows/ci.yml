@@ -214,6 +214,7 @@ jobs:
             docs/proof/**
             .check-logs/
           if-no-files-found: ignore
+          include-hidden-files: true # .check-logs/ is a dot directory, skipped by default
           retention-days: 7
 
   browser:
@@ -270,6 +271,7 @@ jobs:
             docs/proof/**
             .check-logs/
           if-no-files-found: ignore
+          include-hidden-files: true # .check-logs/ is a dot directory, skipped by default
           retention-days: 7
 
   bench:

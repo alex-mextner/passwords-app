@@ -266,7 +266,8 @@ gate_pip-audit() { run_gate pip-audit pip-audit,uv -- pip_audit_resolved; }
 
 gate_gitleaks() {
   if git rev-parse --verify -q HEAD >/dev/null; then
-    run_gate gitleaks gitleaks -- "$(tool gitleaks)" git --no-banner --redact .
+    # gitleaks defaults to `git log --all`, which would scan every other fetched branch too.
+    run_gate gitleaks gitleaks -- "$(tool gitleaks)" git --no-banner --redact --log-opts=HEAD .
   else
     run_gate gitleaks gitleaks -- "$(tool gitleaks)" dir --no-banner --redact src tests scripts data
   fi
@@ -401,7 +402,11 @@ gate_coverage() {
     --include="$COVERAGE_INCLUDE"
 }
 # Headless gnome-shell sessions are serialized by the harness; one worker avoids queueing.
-gate_gui() { pytest_layer gui "gui and not live" 0; }
+# Screenshots and recordings land under the log dir, which CI uploads, so a failure can be seen.
+# A fresh dir per run: pytest wipes its basetemp, which would hit a concurrent run's files.
+gate_gui() {
+  pytest_layer gui "gui and not live" 0 --basetemp="$(mktemp -d "$LOG_DIR/gui-tmp.XXXXXX")"
+}
 gate_e2e() { pytest_layer e2e "e2e and not live" 0; }
 gate_browser() { pytest_layer browser "browser and not live" 0; }
 gate_bench() { pytest_layer bench "benchmark and not live" 0 --benchmark-only; }

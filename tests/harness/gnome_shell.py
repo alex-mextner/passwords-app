@@ -636,11 +636,29 @@ class GnomeShellSession:
         """Wait until a window titled exactly ``title`` is mapped and painted."""
 
         def probe() -> WindowInfo | None:
-            return next((w for w in self.windows() if w.title == title), None)
+            # Introspect lists a window as soon as its app tracks it, before the client has
+            # attached its first buffer; mutter shows the actor only once that buffer exists.
+            return next(
+                (
+                    w
+                    for w in self.windows()
+                    if w.title == title and self._window_actor_shown(w.window_id)
+                ),
+                None,
+            )
 
         window = wait_until(probe, timeout=timeout, interval=0.2, what=f"window {title!r}")
         self.wait_frames(2)
         return window
+
+    def _window_actor_shown(self, window_id: int) -> bool:
+        # `?.`: an actor being unmanaged mid-poll can have a null meta_window.
+        shown = self.eval_js(
+            "global.get_window_actors().some(a => a.meta_window?.get_id() == "
+            + str(int(window_id))
+            + " && a.visible && a.meta_window.showing_on_its_workspace())"
+        )
+        return shown == "true"
 
     def wait_frames(self, count: int = 1) -> None:
         """Block until the stage has painted ``count`` more frames."""
