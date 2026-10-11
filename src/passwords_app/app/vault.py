@@ -88,6 +88,11 @@ class Vault(GObject.Object):
         self.hibp_enabled = False
         self._hibp_factory = hibp or HibpClient
         self._by_id: dict[str, ItemObject] = {}
+        # Items the reload that last emitted items-changed found changed: named by the
+        # daemon, or listed differently. A password edit changes nothing the list shows,
+        # and iCloud stamps whole seconds, so the daemon's names are the only sure sign.
+        self.changed_ids: frozenset[str] = frozenset()
+        self._announced: set[str] = set()
         self._reload_source = 0
         self._reload_items = False
         self._trash_loaded = False
@@ -150,34 +155,48 @@ class Vault(GObject.Object):
     def _reload_now(self) -> bool:
         self._reload_source = 0
         if self._reload_items:
-            self.client.list_items(self._on_items)
+            self._list_items()
         self._reload_items = False
         self.client.list_trash(self._on_trash)
         return GLib.SOURCE_REMOVE
 
     def reload(self) -> None:
-        self.client.list_items(self._on_items)
+        self._list_items()
         self.client.list_trash(self._on_trash)
+
+    def _list_items(self) -> None:
+        # A name announced after this request left may be missing from its reply; it stays
+        # for the reload that announcement scheduled.
+        announced, self._announced = frozenset(self._announced), set()
+
+        def listed(result: list[Item] | DaemonError) -> None:
+            self._on_items(result, announced)
+
+        self.client.list_items(listed)
 
     def refresh_status(self) -> None:
         self.client.get_status(self._on_status)
 
-    def _on_items(self, result: list[Item] | DaemonError) -> None:
+    def _on_items(self, result: list[Item] | DaemonError, announced: frozenset[str]) -> None:
         if isinstance(result, DaemonError):
+            self._announced |= announced
             self._fail(result)
             return
         previous = self._by_id
         objects: list[ItemObject] = []
+        changed = set(announced)
         for item in result:
             old = previous.get(item.id)
             if old is not None and old.item == item:
                 objects.append(old)  # unchanged: keep the object, its caches and verdicts
             else:
+                changed.add(item.id)
                 obj = ItemObject(item)
                 if old is not None:
                     obj.issues = old.issues
                 objects.append(obj)
         self._by_id = {o.item.id: o for o in objects}
+        self.changed_ids = frozenset(changed)
         # Before the splice: the store's items-changed is what the list page redraws from,
         # and it must already see the vault loaded or it stays on the spinner.
         self.loaded = True
@@ -212,7 +231,8 @@ class Vault(GObject.Object):
         if self._trash_loaded and status.trash_count != self.trash.get_n_items():
             self.schedule_reload(items=False)
 
-    def _on_items_signal(self, _ids: list[str]) -> None:
+    def _on_items_signal(self, ids: list[str]) -> None:
+        self._announced.update(ids)
         self.schedule_reload()
 
     def _on_daemon_appeared(self) -> None:

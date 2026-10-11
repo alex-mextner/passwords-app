@@ -323,6 +323,23 @@ def test_items_changed_burst_coalesces_into_one_list_call(
     assert events.count("trash-changed") == 1
 
 
+def test_reload_names_the_items_the_daemon_announced(vault: Vault, fake: FakeDaemonThread) -> None:
+    # A password edit in the second of the previous change leaves the listing as it was;
+    # only the daemon's ItemsChanged tells the detail pane to fetch it again (#111).
+    target = vault.items.get_item(3)
+    assert target is not None
+    events = Events(vault)
+
+    def edit_password(d: FakeDaemon) -> None:
+        d.items[target.item.id] = replace(d.items[target.item.id], password="example-pw-2")
+        d._items_changed([target.item.id])
+
+    fake.call(edit_password)
+    wait_until(lambda: events.count("items-changed") == 1, what="reload")
+    assert vault.changed_ids == {target.item.id}
+    assert vault.find(target.item.id) is target  # the listing itself did not change
+
+
 def test_unchanged_items_keep_their_objects(vault: Vault, fake: FakeDaemonThread) -> None:
     events = Events(vault)
     scanned(vault, events, 0)

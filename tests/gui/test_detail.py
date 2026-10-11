@@ -165,6 +165,26 @@ def test_open_website_hands_the_url_to_the_launcher(
     assert opened == [item.url]
 
 
+@pytest.mark.parametrize(
+    "change",
+    [{"password": "FAKE-changed-on-iphone"}, {"title": "NW Mail"}],
+    ids=["password", "title"],
+)
+def test_item_edited_elsewhere_in_the_same_second_redraws_the_pane(
+    app: support.AppUnderTest, change: dict[str, str]
+) -> None:
+    # The daemon names the item it changed; its modified time alone cannot tell (#111).
+    app.wait_loaded()
+    item = app.select("Northwind Mail")
+    app.edit_remotely(item.id, **change)
+    detail = app.window.detail
+    support.wait_until(
+        lambda: all(getattr(detail.item, name) == value for name, value in change.items()),
+        what="the edit in the detail pane",
+    )
+    assert detail.item.modified == item.modified
+
+
 def test_item_deleted_elsewhere_clears_the_pane(app: support.AppUnderTest) -> None:
     app.wait_loaded()
     item = app.select("Northwind Mail")
