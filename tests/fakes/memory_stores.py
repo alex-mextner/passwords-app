@@ -13,7 +13,9 @@ API summary (keep it small; daemon, app, browser, and e2e suites depend on it):
 - `on_write`: optional async hook run inside `upsert`/`delete` before the etag check, to
   model a concurrent device edit racing the engine.
 - `reject(id, reason)` / `accept(id)`: every `upsert` of that item raises `ItemRejected`
-  (iCloud refusing one login, e.g. a duplicate site and account) until it is accepted.
+  (iCloud refusing one login) until it is accepted.
+- `unique_logins = True`: like Apple's keychain, an `upsert` giving an item the site and
+  username (`login_identity`) of another stored item raises `ItemRejected`.
 - `calls`: list of `(op, item_id | None)` in call order.
 
 `MemoryLocal` (GNOME Keyring collection stand-in)
@@ -39,6 +41,7 @@ from types import MappingProxyType
 from typing import TYPE_CHECKING, Any, Literal
 
 from passwords_app.core.model import Credential
+from passwords_app.core.urls import login_identity
 from passwords_app.sync.ports import (
     ConflictError,
     ItemRejected,
@@ -95,6 +98,7 @@ class MemoryRemote:
         self.on_write: Callable[[str], Awaitable[None]] | None = None
         self.calls: list[tuple[Op, str | None]] = []
         self._rejected: dict[str, str] = {}
+        self.unique_logins = False
         for c in (items or {}).values():
             self.put(c)
 
@@ -141,6 +145,8 @@ class MemoryRemote:
         self._enter("upsert", credential.id)
         if credential.id in self._rejected:
             raise ItemRejected(self._rejected[credential.id])
+        if self.unique_logins:
+            self._refuse_duplicate(credential)
         if self.on_write is not None:
             await self.on_write(credential.id)
         current = self._items.get(credential.id)
@@ -151,6 +157,15 @@ class MemoryRemote:
             msg = f"record {credential.id} changed since fetch"
             raise ConflictError(msg)
         return self.put(credential)
+
+    def _refuse_duplicate(self, credential: Credential) -> None:
+        identity = login_identity(credential)
+        for other in self._items.values():
+            if other.credential.id != credential.id and login_identity(other.credential) == (
+                identity
+            ):
+                msg = f"another login for {credential.username!r} on {credential.url} exists"
+                raise ItemRejected(msg)
 
     async def delete(self, item_id: str, etag: str | None) -> None:
         self._enter("delete", item_id)

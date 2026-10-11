@@ -147,6 +147,20 @@ async def test_remote_rejects_one_item_until_it_is_accepted() -> None:
     assert set(remote.items) == {"A", "B"}
 
 
+async def test_remote_with_unique_logins_refuses_a_second_login_for_a_site_and_user() -> None:
+    remote = MemoryRemote({"A": make_credential("A", url="https://x.example", username="al")})
+    twin = make_credential("B", url="https://X.example", username="AL")
+    await remote.upsert(twin, None)  # off by default: only ids collide
+    remote.remove("B")
+    remote.unique_logins = True
+    with pytest.raises(ItemRejected, match="another login"):
+        await remote.upsert(twin, None)
+    etag = remote.etag_of("A")
+    await remote.upsert(make_credential("A", url="https://x.example", username="AL"), etag)
+    await remote.upsert(make_credential("C", url="https://x.example", username="bo"), None)
+    assert set(remote.items) == {"A", "C"}
+
+
 # ---------------------------------------------------------------- MemoryLocal
 
 

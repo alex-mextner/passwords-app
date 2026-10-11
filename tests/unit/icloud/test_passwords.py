@@ -16,6 +16,7 @@ from typing import TYPE_CHECKING
 import pytest
 
 from passwords_app.core.model import Credential
+from passwords_app.core.urls import login_identity
 from passwords_app.icloud import passwords as pw
 
 if TYPE_CHECKING:
@@ -652,3 +653,32 @@ def test_is_login_and_is_sidecar(value: str) -> None:
 def test_non_ascii_digit_in_otpauth_falls_back_to_the_default() -> None:
     totp = pw.totp_from_otpauth(f"otpauth://totp/alice?secret={SECRET_B32}&digits=%C2%B2")
     assert totp["digits"] == 6
+
+
+_IDENTITY_URLS = (
+    "https://example.com",
+    "https://EXAMPLE.com",
+    "https://example.com/",
+    "https://example.com/login",
+    "https://example.com/login?next=1",
+    "https://example.com:443",
+    "https://example.com:8443",
+    "http://example.com",
+    "ftp://example.com",
+    "https://www.example.com",
+    "https://[fe80::1]:444",
+)
+
+
+def test_login_identity_is_the_keychain_duplicate_rule() -> None:
+    """`login_identity` (used to restore over a live twin) agrees with what Apple rejects."""
+    logins = [
+        Credential(f"id{i}-{user}", url, user, "p", T0, T0)
+        for i, url in enumerate(_IDENTITY_URLS)
+        for user in ("alice", "ALICE", "bob", "")
+    ]
+    for a in logins:
+        key_a = pw.primary_key(pw.new_login(a, NOW).item)
+        for b in logins:
+            same_in_keychain = key_a == pw.primary_key(pw.new_login(b, NOW).item)
+            assert (login_identity(a) == login_identity(b)) == same_in_keychain, (a.url, b.url)

@@ -11,6 +11,7 @@ from typing import TYPE_CHECKING, Any
 import pytest
 from tests.fakes.memory_stores import MemoryLocal, MemoryRemote, make_credential
 
+from passwords_app.core.model import TrashEntry
 from passwords_app.store.state import StateStore
 from passwords_app.sync.engine import (
     LAST_SYNC_KEY,
@@ -348,16 +349,192 @@ async def test_s14_restore_puts_item_back_on_both_sides(w: World) -> None:
     assert w.converged()
 
 
-async def test_s14_restoring_a_conflict_loser_never_overwrites_the_winner(w: World) -> None:
+async def test_s12_restoring_the_conflict_loser_replaces_the_winner(w: World) -> None:
+    # #66: iCloud keeps one login per site and username, so the loser cannot come back
+    # next to the winner. Restoring it makes it the login again; the winner goes to trash.
+    w.remote.unique_logins = True
+    a = make_credential("A")
+    await synced(w, a)
+    w.local.put(at(a, 1, password="fake-loser"))
+    winner = at(a, 2, password="fake-winner")
+    w.remote.put(winner)
+    await w.engine.run_once()
+    (entry,) = w.engine.trash()
+    w.clock.advance(hours=1)
+    restored_id = await w.engine.restore(entry.trash_id)
+    assert restored_id == "A"
+    assert w.local.items["A"].password == "fake-loser"
+    assert w.local.items["A"].modified == w.clock.now
+    (displaced,) = w.engine.trash()
+    assert (displaced.credential, displaced.reason) == (winner, "conflict")
+    report = await w.engine.run_once()
+    assert report.skipped_reason is None
+    assert report.upload_failures == ()
+    assert report.updated_remote == 1
+    assert list(w.remote.items) == ["A"]
+    assert w.remote.items["A"].credential.password == "fake-loser"
+    assert w.converged()
+
+
+async def test_s12_after_restoring_the_loser_later_changes_still_reach_icloud(w: World) -> None:
+    w.remote.unique_logins = True
     a = make_credential("A")
     await synced(w, a)
     w.local.put(at(a, 1, password="fake-loser"))
     w.remote.put(at(a, 2, password="fake-winner"))
     await w.engine.run_once()
     (entry,) = w.engine.trash()
-    new_id = await w.engine.restore(entry.trash_id)
+    await w.engine.restore(entry.trash_id)
     await w.engine.run_once()
-    assert w.remote.items["A"].credential.password == "fake-winner"
+    w.local.put(make_credential("LATER"))
+    report = await w.engine.run_once()
+    assert report.skipped_reason is None
+    assert "LATER" in w.remote.items
+
+
+async def test_restoring_over_a_twin_matches_site_and_username_case_insensitively(
+    w: World,
+) -> None:
+    w.remote.unique_logins = True
+    old = make_credential("OLD", url="https://bank.example/login", username="Alice")
+    await synced(w, old)
+    w.local.remove("OLD")
+    await w.engine.run_once()
+    (entry,) = w.engine.trash()
+    live = make_credential("NEW", url="https://BANK.example/login", username="alice")
+    await synced(w, live)
+    restored_id = await w.engine.restore(entry.trash_id)
+    assert restored_id == "NEW"
+    assert set(w.local.items) == {"NEW"}
+    assert w.local.items["NEW"].password == old.password
+    assert [e.credential for e in w.engine.trash()] == [live]
+    await w.engine.run_once()
+    assert w.remote.items["NEW"].credential.password == old.password
+    assert w.converged()
+
+
+async def test_restoring_a_version_equal_to_its_twin_changes_nothing(w: World) -> None:
+    a = make_credential("A")
+    await synced(w, a)
+    w.local.remove("A")
+    await w.engine.run_once()
+    (entry,) = w.engine.trash()
+    twin = make_credential("B", url=a.url, username=a.username, password=a.password)
+    await synced(w, twin)
+    assert await w.engine.restore(entry.trash_id) == "B"
+    assert w.local.items["B"] == twin
+    assert w.engine.trash() == []
+
+
+async def test_restore_prefers_the_synced_twin(w: World) -> None:
+    synced_twin = make_credential("Z", url="https://x.example", username="u")
+    await synced(w, synced_twin)
+    w.remote.remove("Z")
+    await w.engine.run_once()
+    (entry,) = w.engine.trash()
+    await synced(w, synced_twin)
+    # A second keyring copy made in Seahorse, not in iCloud yet.
+    w.local.put(make_credential("A", url="https://x.example", username="u", password="pw-a"))
+    assert await w.engine.restore(entry.trash_id) == "Z"
+
+
+async def test_restore_over_a_twin_keeps_it_when_the_keyring_write_fails(w: World) -> None:
+    old = make_credential("OLD", url="https://x.example", password="fake-old")
+    await synced(w, old)
+    w.local.remove("OLD")
+    await w.engine.run_once()
+    (entry,) = w.engine.trash()
+    live = make_credential("NEW", url="https://x.example", password="fake-live")
+    await synced(w, live)
+    w.local.fail_next("upsert", LocalUnavailable("locked mid-restore"))
+    with pytest.raises(LocalUnavailable):
+        await w.engine.restore(entry.trash_id)
+    assert w.local.items["NEW"] == live
+    assert w.engine.trash() == [entry]
+
+
+async def test_restore_prefers_the_twin_with_the_versions_own_id(w: World) -> None:
+    # iCloud logins differing only in what a Credential drops (a default port, the security
+    # domain) read back with one url: the version must replace its own login, not a lookalike.
+    a = make_credential("A", url="https://x.example", username="u")
+    z = make_credential("Z", url="https://x.example", username="u", password="fake-z")
+    await synced(w, a, z)
+    w.local.put(at(z, 1, password="fake-z-loser"))
+    w.remote.put(at(z, 2, password="fake-z-winner"))
+    await w.engine.run_once()
+    (entry,) = w.engine.trash()
+    assert await w.engine.restore(entry.trash_id) == "Z"
+    assert w.local.items["A"] == a
+
+
+async def test_restoring_the_agreed_version_beats_a_pending_icloud_edit(w: World) -> None:
+    # Base A, keyring B, iCloud C, and A in trash: restoring A must not read as "no keyring
+    # change", which would let C overwrite it unseen.
+    a = make_credential("A", password="fake-a")
+    await synced(w, a)
+    w.state.add_trash(TrashEntry("T", a, T0, "conflict"))
+    b = at(a, 1, password="fake-b")
+    c = at(a, 2, password="fake-c")
+    w.local.put(b)
+    w.remote.put(c)
+    w.clock.advance(hours=1)
+    assert await w.engine.restore("T") == "A"
+    await w.engine.run_once()
+    assert w.local.items["A"].password == "fake-a"
+    assert w.remote.items["A"].credential.password == "fake-a"
+    assert sorted(e.credential.password for e in w.engine.trash()) == ["fake-b", "fake-c"]
+    assert w.converged()
+
+
+async def test_restoring_the_agreed_version_with_icloud_unchanged_uploads_nothing(
+    w: World,
+) -> None:
+    a = make_credential("A", password="fake-a")
+    await synced(w, a)
+    w.state.add_trash(TrashEntry("T", a, T0, "conflict"))
+    w.local.put(at(a, 1, password="fake-b"))
+    await w.engine.restore("T")
+    report = await w.engine.run_once()
+    assert (report.updated_remote, report.conflicts) == (0, 0)
+    assert w.remote.items["A"].credential.password == "fake-a"
+    assert [e.credential.password for e in w.engine.trash()] == ["fake-b"]
+
+
+async def test_a_malformed_live_url_does_not_block_restoring_others(w: World) -> None:
+    old = make_credential("OLD", url="https://x.example")
+    await synced(w, old)
+    w.local.remove("OLD")
+    await w.engine.run_once()
+    (entry,) = w.engine.trash()
+    w.local.put(make_credential("BROKEN", url="https://[broken"))
+    w.local.put(make_credential("LIVE", url="https://x.example", password="fake-live"))
+    assert await w.engine.restore(entry.trash_id) == "LIVE"
+
+
+@pytest.mark.parametrize("url", ["https://x.example/#anchor", "https://user@x.example/"])
+async def test_a_version_icloud_cannot_store_never_replaces_a_live_login(
+    w: World, url: str
+) -> None:
+    live = make_credential("LIVE", url="https://x.example/")
+    await synced(w, live)
+    w.state.add_trash(TrashEntry("T", make_credential("OLD", url=url), T0, "deleted-on-linux"))
+    new_id = await w.engine.restore("T")
+    assert new_id != "LIVE"
+    assert w.local.items["LIVE"] == live
+
+
+async def test_restore_with_a_changed_username_is_a_separate_login(w: World) -> None:
+    w.remote.unique_logins = True
+    a = make_credential("A")
+    await synced(w, a)
+    w.local.put(at(a, 1, password="fake-loser"))
+    w.remote.put(at(a, 2, username="renamed"))
+    await w.engine.run_once()
+    (entry,) = w.engine.trash()
+    new_id = await w.engine.restore(entry.trash_id)
+    assert new_id != "A"
+    await w.engine.run_once()
+    assert w.remote.items["A"].credential.username == "renamed"
     assert w.remote.items[new_id].credential.password == "fake-loser"
 
 

@@ -221,6 +221,38 @@ def link_host(raw_url: str) -> str:
         return ""
 
 
+type LoginIdentity = tuple[str, str, str, int, str]
+
+
+def login_identity(c: Credential) -> LoginIdentity | None:
+    """Return what makes two logins "the same login" in iCloud Keychain (it keeps one of each).
+
+    Mirrors the keychain's key for a website login: host and username (both compared
+    case-insensitively), scheme, port exactly as written, and path with query. None when the
+    url is not a website address the keychain could store (as its writer decides: no
+    fragment, no user information), so such a login never counts as anyone's twin.
+    Credentials read back from iCloud lose a default port and the keychain's security domain
+    and authentication type, so two distinct keychain logins can share one identity here.
+    """
+    try:
+        parts = urlsplit(c.url)
+        port = parts.port or 0
+    except ValueError:
+        return None
+    scheme = parts.scheme.lower()
+    host = parts.hostname
+    if (
+        scheme not in {"https", "http", "ftp"}
+        or not host
+        or parts.fragment
+        or parts.username is not None
+        or parts.password is not None
+    ):
+        return None
+    path = parts.path + ("?" + parts.query if parts.query else "")
+    return (host.lower(), c.username.lower(), scheme, port, path)
+
+
 def _same_origin_rules_allow(page: _Url, cred: _Url) -> bool:
     if cred.scheme not in _WEB_SCHEMES:
         return False

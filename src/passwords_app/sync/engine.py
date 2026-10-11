@@ -20,6 +20,7 @@ from datetime import UTC, datetime
 from typing import TYPE_CHECKING, assert_never
 
 from passwords_app.core.model import TrashEntry
+from passwords_app.core.urls import login_identity
 from passwords_app.sync.plan import (
     BaseEntry,
     CreateLocal,
@@ -35,6 +36,7 @@ from passwords_app.sync.plan import (
     Trash,
     UpdateLocal,
     UpdateRemote,
+    content_key,
     plan,
     trash_id,
 )
@@ -50,9 +52,9 @@ from passwords_app.sync.ports import (
 )
 
 if TYPE_CHECKING:
-    from collections.abc import Callable
+    from collections.abc import Callable, Mapping
 
-    from passwords_app.core.model import Credential
+    from passwords_app.core.model import Credential, TrashReason
     from passwords_app.store.state import StateStore
     from passwords_app.sync.plan import Action
     from passwords_app.sync.ports import (
@@ -73,6 +75,10 @@ SKIP_AUTH = "auth-required"
 
 def utcnow() -> datetime:
     return datetime.now(UTC)
+
+
+def _trash_entry(credential: Credential, reason: TrashReason, now: datetime) -> TrashEntry:
+    return TrashEntry(trash_id(credential, reason), credential, now, reason)
 
 
 class NoPendingDeletionsError(LookupError):
@@ -334,7 +340,7 @@ class SyncEngine:
         state = self._state
         match action:
             case Trash(credential, reason):
-                entry = TrashEntry(trash_id(credential, reason), credential, now, reason)
+                entry = _trash_entry(credential, reason, now)
                 if state.add_trash(entry) and reason == "conflict":
                     counts["conflicts"] += 1
             case CreateLocal(credential, etag):
@@ -417,18 +423,68 @@ class SyncEngine:
     async def restore(self, trash_id: str) -> str:
         """Put a trashed version back into the keyring; the next cycle uploads it.
 
-        The copy always gets a fresh id: the original id may still be live (a conflict
-        loser's id belongs to the winner) or tombstoned in iCloud, and reusing it would
-        overwrite the winner or collide with Apple's Recently Deleted record.
+        iCloud Keychain keeps one login per site and username, so a version whose twin is
+        live in the keyring (a conflict loser and its winner, or the login saved again since)
+        cannot come back next to it: it replaces the twin in place, as the current version of
+        that login, and the displaced version goes to trash so nothing is lost. Without a
+        twin the copy gets a fresh id: the original id may be tombstoned in iCloud, and
+        reusing it would collide with Apple's Recently Deleted record.
         """
         entry = self._state.get_trash(trash_id)
         if entry is None:
             raise KeyError(trash_id)
         now = self._clock()
-        restored = dataclasses.replace(entry.credential, id=str(uuid.uuid4()).upper(), modified=now)
-        await self._local.upsert(restored)
+        twin = self._live_twin(entry.credential, (await self._local.fetch()).items)
+        if twin is None:
+            restored = dataclasses.replace(
+                entry.credential, id=str(uuid.uuid4()).upper(), modified=now
+            )
+            await self._local.upsert(restored)
+        elif content_key(twin) == content_key(entry.credential):
+            restored = twin
+        else:
+            restored = dataclasses.replace(entry.credential, id=twin.id, modified=now)
+            displaced = _trash_entry(twin, "conflict", now)
+            added = self._state.add_trash(displaced)  # committed before the overwrite
+            try:
+                await self._local.upsert(restored)
+            except LocalUnavailable:
+                # Nothing was written, so the twin is still live: no copy of it is needed.
+                if added:
+                    self._state.remove_trash(displaced.trash_id)
+                raise
+            with self._state.transaction():
+                self._mark_restored_as_edit(twin, restored)
+                self._state.remove_trash(trash_id)
+            return restored.id
         self._state.remove_trash(trash_id)
         return restored.id
+
+    def _mark_restored_as_edit(self, displaced: Credential, restored: Credential) -> None:
+        """Make the planner see the restore as an edit of `displaced` into `restored`.
+
+        Restoring the version both sides last agreed on would otherwise read as "no change
+        in the keyring", and a pending iCloud edit of the login would overwrite it unseen.
+        Recording the displaced version as the agreed one makes the restore compete like
+        any keyring edit: newer wins, the loser goes to trash.
+        """
+        base = self._state.bases().get(restored.id)
+        if base is not None and content_key(base.credential) == content_key(restored):
+            self._state.set_base(BaseEntry(displaced, base.etag))
+
+    def _live_twin(self, version: Credential, live: Mapping[str, Credential]) -> Credential | None:
+        """Return the keyring login iCloud would see as the same login as `version`, if any."""
+        identity = login_identity(version)
+        if identity is None:
+            return None
+        twins = [c for c in live.values() if login_identity(c) == identity]
+        if len(twins) <= 1:
+            return twins[0] if twins else None
+        # Several keyring logins share the identity (Seahorse duplicates, or iCloud logins
+        # that differ only in what a Credential does not carry): prefer the version's own
+        # login, then the one iCloud already has.
+        synced = self._state.bases().keys()
+        return min(twins, key=lambda c: (c.id != version.id, c.id not in synced, c.id))
 
     def purge(self, trash_id: str) -> None:
         """Delete a trash entry for good."""
