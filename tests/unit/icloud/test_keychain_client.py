@@ -309,7 +309,9 @@ def test_renaming_onto_another_login_is_rejected(
 
 def test_same_account_on_another_port_is_a_different_login(keychain: KeychainClient) -> None:
     keychain.save(_cred(1), None)
-    other = dataclasses.replace(_cred(1), id=_cred(9).id, url="https://site1.example:8443")
+    other = dataclasses.replace(
+        _cred(1), id=_cred(9).id, url="https://site1.example:8443", password="other"
+    )
     keychain.save(other, None)
     assert set(keychain.fetch()) == {_cred(1).id, _cred(9).id}
 
@@ -801,3 +803,198 @@ def test_any_saved_login_reads_back_unchanged(
     assert stored.etag == etag
     assert _same(stored.credential, cred)
     assert _same(fake.logins()[cred.id], cred)
+
+
+# --- one login on several websites ---------------------------------------------------------------
+# Apple keeps a login used on several websites of one domain as one record per website (same
+# account and password); the Passwords app shows them as one entry with several websites.
+
+T1 = datetime(2024, 5, 6, 7, 8, 9, tzinfo=UTC)
+
+
+def _site(n: int, url: str, **over: object) -> Credential:
+    """Records of one login: same account and password, each on its own website."""
+    created = over.pop("created", T0 if n == 1 else T1)
+    fields: dict[str, object] = {"username": "kim", "password": "same", **over}
+    return _cred(n, url=url, created=created, modified=created, **fields)
+
+
+def _group(fake: FakeCloudKit) -> tuple[Credential, Credential]:
+    main, other = _site(1, "https://example.com"), _site(2, "https://login.example.com")
+    fake.put_login(other)
+    fake.put_login(main)
+    return main, other
+
+
+def test_records_of_one_login_on_one_domain_read_as_one_credential(
+    fake: FakeCloudKit, keychain: KeychainClient
+) -> None:
+    main, other = _group(fake)
+    got = keychain.fetch()
+    assert set(got) == {main.id}  # the oldest record names the login
+    cred = got[main.id].credential
+    assert (cred.url, cred.alt_urls) == ("https://example.com", ("https://login.example.com",))
+    assert [o.login.record_name for o in got[main.id].others] == [other.id]
+
+
+def test_records_on_different_domains_stay_separate_logins(
+    fake: FakeCloudKit, keychain: KeychainClient
+) -> None:
+    fake.put_login(_site(1, "https://example.com"))
+    fake.put_login(_site(2, "https://example.org"))
+    fake.put_login(_site(3, "https://login.example.com", password="other"))
+    fake.put_login(_site(4, "https://www.example.com", username="kim2"))
+    assert len(keychain.fetch()) == 4
+
+
+def test_alternate_sites_join_the_record_kept_for_that_site(
+    fake: FakeCloudKit, keychain: KeychainClient
+) -> None:
+    main = _site(1, "https://example.com", alt_urls=("example.org",))
+    fake.put_login(main)
+    fake.put_login(_site(2, "https://example.org"))
+    got = keychain.fetch()
+    assert set(got) == {main.id}
+    assert got[main.id].credential.alt_urls == ("https://example.org",)
+
+
+def test_group_etag_covers_every_record(fake: FakeCloudKit, keychain: KeychainClient) -> None:
+    main, other = _group(fake)
+    before = keychain.fetch()[main.id].etag
+    fake.put_item(other.id, {**fake.item(other.id), "mdat": T1, "labl": "renamed"})
+    assert keychain.fetch()[main.id].etag != before
+
+
+def test_password_change_rewrites_every_record_and_creates_none(
+    fake: FakeCloudKit, keychain: KeychainClient
+) -> None:
+    main, other = _group(fake)
+    stored = keychain.fetch()[main.id]
+    names = set(fake.items())
+    etag = keychain.save(dataclasses.replace(stored.credential, password="new"), stored.etag)
+    assert set(fake.items()) == names
+    assert {fake.logins()[i].password for i in (main.id, other.id)} == {"new"}
+    again = keychain.fetch()
+    assert set(again) == {main.id}
+    assert again[main.id].etag == etag
+
+
+def test_stale_group_etag_is_a_conflict(fake: FakeCloudKit, keychain: KeychainClient) -> None:
+    main, other = _group(fake)
+    stored = keychain.fetch()[main.id]
+    fake.put_item(other.id, {**fake.item(other.id), "mdat": T1, "labl": "renamed"})
+    keychain.fetch()
+    with pytest.raises(RecordConflictError):
+        keychain.save(dataclasses.replace(stored.credential, password="new"), stored.etag)
+
+
+def test_removing_a_website_moves_only_its_record_to_recently_deleted(
+    fake: FakeCloudKit, keychain: KeychainClient
+) -> None:
+    main, other = _group(fake)
+    stored = keychain.fetch()[main.id]
+    keychain.save(dataclasses.replace(stored.credential, alt_urls=()), stored.etag)
+    assert set(fake.logins()) == {main.id}
+    assert set(fake.logins(deleted=True)) == {other.id}
+    assert keychain.fetch()[main.id].credential.alt_urls == ()
+
+
+def test_adding_a_website_to_a_group_creates_no_record(
+    fake: FakeCloudKit, keychain: KeychainClient
+) -> None:
+    main, _ = _group(fake)
+    stored = keychain.fetch()[main.id]
+    logins = set(fake.logins())
+    alt = (*stored.credential.alt_urls, "https://example.net")
+    etag = keychain.save(dataclasses.replace(stored.credential, alt_urls=alt), stored.etag)
+    assert set(fake.logins()) == logins
+    again = keychain.fetch()[main.id]
+    assert again.credential.alt_urls == alt
+    assert again.etag == etag
+
+
+def test_metadata_edit_reads_back_from_a_group(
+    fake: FakeCloudKit, keychain: KeychainClient
+) -> None:
+    main = _site(1, "https://example.com")
+    other = _site(2, "https://login.example.com", notes="old note")
+    fake.put_login(main)
+    fake.put_login(other)
+    stored = keychain.fetch()[main.id]
+    assert stored.credential.notes == "old note"
+    keychain.save(dataclasses.replace(stored.credential, notes=None, title="T"), stored.etag)
+    cred = keychain.fetch()[main.id].credential
+    assert (cred.title, cred.notes) == ("T", None)
+
+
+def test_deleting_a_group_moves_every_record_to_recently_deleted(
+    fake: FakeCloudKit, keychain: KeychainClient
+) -> None:
+    main, other = _group(fake)
+    stored = keychain.fetch()[main.id]
+    keychain.delete(main.id, stored.etag)
+    assert fake.logins() == {}
+    assert set(fake.logins(deleted=True)) == {main.id, other.id}
+
+
+def test_a_new_login_for_another_site_of_a_group_joins_it(
+    fake: FakeCloudKit, keychain: KeychainClient
+) -> None:
+    main, other = _group(fake)
+    keychain.fetch()
+    third = _site(3, "https://m.example.com", created=T1.replace(year=2025))
+    keychain.save(third, None)
+    got = keychain.fetch()
+    assert set(got) == {main.id}
+    assert set(got[main.id].credential.alt_urls) == {other.url, third.url}
+
+
+def test_records_with_different_notes_stay_separate_logins(
+    fake: FakeCloudKit, keychain: KeychainClient
+) -> None:
+    fake.put_login(_site(1, "https://example.com", notes="one"))
+    fake.put_login(_site(2, "https://login.example.com", notes="two"))
+    assert len(keychain.fetch()) == 2
+
+
+def test_group_save_is_conditional_on_every_sidecar(
+    fake: FakeCloudKit, keychain: KeychainClient
+) -> None:
+    main = _site(1, "https://example.com")
+    other = _site(2, "https://login.example.com", notes="note")
+    fake.put_login(main)
+    fake.put_login(other, sidecar_name="SIDE2")
+    stored = keychain.fetch()[main.id]
+    fake.put_item("SIDE2", {**fake.item("SIDE2"), "mdat": T1, "labl": "edited elsewhere"})
+    with pytest.raises(RecordConflictError):
+        keychain.save(dataclasses.replace(stored.credential, password="new"), stored.etag)
+    assert fake.logins()[main.id].password == "same"
+
+
+def test_moving_the_main_website_to_another_domain_keeps_the_group(
+    fake: FakeCloudKit, keychain: KeychainClient
+) -> None:
+    main, other = _group(fake)
+    stored = keychain.fetch()[main.id]
+    moved = dataclasses.replace(stored.credential, url="https://example.org")
+    keychain.save(moved, stored.etag)
+    got = keychain.fetch()
+    assert set(got) == {main.id}
+    assert (got[main.id].credential.url, got[main.id].credential.alt_urls) == (
+        "https://example.org",
+        (other.url,),
+    )
+
+
+def test_moving_the_main_website_keeps_a_group_whose_records_list_alternate_sites(
+    fake: FakeCloudKit, keychain: KeychainClient
+) -> None:
+    main = _site(1, "https://example.com")
+    other = _site(2, "https://login.example.com", alt_urls=("www.example.com",))
+    fake.put_login(main)
+    fake.put_login(other)
+    stored = keychain.fetch()[main.id]
+    keychain.save(dataclasses.replace(stored.credential, url="https://example.org"), stored.etag)
+    got = keychain.fetch()
+    assert set(got) == {main.id}
+    assert set(got[main.id].credential.alt_urls) == {other.url, "www.example.com"}

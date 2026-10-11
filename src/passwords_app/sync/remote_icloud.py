@@ -95,7 +95,12 @@ class ICloudRemoteStore:
     async def fetch(self) -> RemoteSnapshot:
         logins = await asyncio.to_thread(self._call, lambda k: k.fetch())
         return RemoteSnapshot(
-            {item_id: RemoteItem(s.credential, s.etag) for item_id, s in logins.items()}
+            {item_id: RemoteItem(s.credential, s.etag) for item_id, s in logins.items()},
+            merged={
+                other.login.record_name: item_id
+                for item_id, s in logins.items()
+                for other in s.others
+            },
         )
 
     async def upsert(self, credential: Credential, etag: str | None) -> str:

@@ -61,6 +61,23 @@ async def test_fetch_returns_credentials_with_their_etags(
     assert item.etag == tag
 
 
+async def test_records_of_one_login_on_several_websites_map_to_that_login(
+    fake: FakeCloudKit, store: ICloudRemoteStore
+) -> None:
+    other = dataclasses.replace(
+        CRED,
+        id="00000000-0000-4000-8000-000000000002",
+        url="https://login.a.example",
+        created=T0.replace(year=2025),
+    )
+    fake.put_login(other)
+    fake.put_login(CRED)
+    snap = await store.fetch()
+    assert set(snap.items) == {CRED.id}
+    assert snap.items[CRED.id].credential.alt_urls == (other.url,)
+    assert snap.merged == {other.id: CRED.id}
+
+
 async def test_upsert_create_edit_delete_cycle(
     fake: FakeCloudKit, store: ICloudRemoteStore
 ) -> None:

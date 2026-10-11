@@ -22,7 +22,7 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING, Literal
 
 from passwords_app.core.model import Credential, TrashReason
-from passwords_app.core.urls import link_host
+from passwords_app.core.urls import link_host, site_key
 from passwords_app.sync.ports import PendingDeletions
 
 if TYPE_CHECKING:
@@ -291,6 +291,23 @@ def _take_match(lid: str, loc: Credential, matches: deque[str] | None) -> str | 
     return rid
 
 
+def _covered(record: Credential, login: Credential) -> bool:
+    """Whether `login` holds everything `record` has: account, password, sites, metadata."""
+    sites = {site_key(u) for u in (login.url, *login.alt_urls)}
+    return (
+        (record.username, record.password) == (login.username, login.password)
+        and all(site_key(u) in sites for u in (record.url, *record.alt_urls))
+        and all(
+            mine in (None, "", theirs)
+            for mine, theirs in (
+                (record.title, login.title),
+                (record.notes, login.notes),
+                (record.otpauth, login.otpauth),
+            )
+        )
+    )
+
+
 def _too_many(policy: SyncPolicy, count: int, items: int) -> bool:
     return count > max(policy.mass_delete_min, policy.mass_delete_ratio * items)
 
@@ -415,6 +432,42 @@ class _Planner:
             return
         self.both_present(item_id, b, item, loc)
 
+    def absorb(self, merged: Mapping[str, str]) -> frozenset[str]:
+        """Retire every record `merged` names that left the snapshot; return their ids."""
+        gone = sorted(
+            (
+                (item_id, self.remote[into])
+                for item_id, into in merged.items()
+                if item_id not in self.remote and into in self.remote
+            ),
+            key=operator.itemgetter(0),
+        )
+        for item_id, into in gone:
+            self.absorbed(item_id, into, self.local.get(item_id))
+        return frozenset(item_id for item_id, _ in gone)
+
+    def absorbed(self, item_id: str, into: RemoteItem, loc: Credential | None) -> None:
+        """Retire `item_id`, a record iCloud now reads as part of the login `into`.
+
+        Not a deletion (see `RemoteSnapshot.merged`), so the mass-delete guard does not
+        hold it. A keyring copy goes to trash unless `into` holds all of it or it holds no
+        edit iCloud never saw (it equals the base and the user did not restore it).
+        """
+        b = self.base.get(item_id)
+        if loc is None:
+            if b is not None:
+                self.emit(item_id, DropBase(item_id))
+            return
+        unedited = (
+            b is not None
+            and content_key(b.credential) == content_key(loc)
+            and item_id not in self.restored
+        )
+        if unedited or _covered(loc, into.credential):
+            self.emit(item_id, DeleteLocal(item_id))
+        else:
+            self.emit(item_id, Trash(loc, "conflict"), DeleteLocal(item_id))
+
     def both_present(self, item_id: str, b: BaseEntry, item: RemoteItem, loc: Credential) -> None:
         bkey = content_key(b.credential)
         rkey = content_key(item.credential)
@@ -507,8 +560,10 @@ def plan(  # noqa: PLR0913 - the pause state is part of what decides deletions
     planner = _Planner(base, remote.items, local.items, decision)
     planner.local_incomplete = bool(local.rejected)
     planner.restored = restored
-    linked: set[str] = set()
-    for lid, rid in _link_pairs(base, remote.items, local.items):
+    absorbed = planner.absorb(remote.merged)
+    unabsorbed = {i: c for i, c in local.items.items() if i not in absorbed}
+    linked: set[str] = set(absorbed)
+    for lid, rid in _link_pairs(base, remote.items, unabsorbed):
         planner.link(lid, rid)
         linked.add(lid)
         linked.add(rid)

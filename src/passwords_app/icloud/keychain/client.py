@@ -13,6 +13,11 @@ in Recently Deleted moves that record back instead of adding a duplicate next to
 
 A login's version token (the sync engine's etag) combines the change tags of its item and its
 sidecar, so an edit to either on another device makes a stale write fail.
+
+Apple keeps a login used on several websites as one record per website (see
+`passwords.group_logins`); those records read as one login named after the oldest one, whose
+token covers every record. Saving it rewrites the records together and never adds one;
+deleting it moves them all into Recently Deleted.
 """
 
 from __future__ import annotations
@@ -20,7 +25,7 @@ from __future__ import annotations
 import dataclasses
 import uuid
 from datetime import UTC, datetime
-from typing import TYPE_CHECKING, Protocol
+from typing import TYPE_CHECKING, Protocol, override
 
 from passwords_app.icloud import passwords
 from passwords_app.icloud.errors import AppleError
@@ -82,9 +87,23 @@ class LoginRecords:
 
 @dataclasses.dataclass(frozen=True, slots=True)
 class StoredLogin(LoginRecords):
-    """A live login as stored, with the credential it maps to."""
+    """A live login as stored, with the credential it maps to.
+
+    `others` are the records of the same login on its other websites, oldest first.
+    """
 
     credential: Credential
+    others: tuple[LoginRecords, ...] = ()
+
+    @property
+    @override
+    def etag(self) -> str:
+        token = version_token(self.item, self.sidecar)
+        return "".join((token, *(f"|{other.etag}" for other in self.others)))
+
+    @property
+    def records(self) -> tuple[LoginRecords, ...]:
+        return (self, *self.others)
 
 
 def version_token(item: ckks.CloudKitRecord, sidecar: ckks.CloudKitRecord | None) -> str:
@@ -181,11 +200,15 @@ class KeychainClient:
         ]
 
     def _logins(self, state: ZoneState) -> dict[str, StoredLogin]:
+        pairs = {pair.login.record_name: pair for pair in self._paired(state)}
         out: dict[str, StoredLogin] = {}
-        for pair in self._paired(state):
-            cred = passwords.to_credential(pair.login)
+        for group in passwords.group_logins(pair.login for pair in pairs.values()):
+            cred = passwords.group_credential(group)
             if cred is not None:
-                out[pair.login.record_name] = StoredLogin(pair.login, pair.item, pair.sidecar, cred)
+                first, *rest = (pairs[login.record_name] for login in group)
+                out[cred.id] = StoredLogin(
+                    first.login, first.item, first.sidecar, cred, tuple(rest)
+                )
         return out
 
     # --- writing -----------------------------------------------------------------------------
@@ -208,6 +231,8 @@ class KeychainClient:
         if (existing.etag if existing is not None else None) != etag:
             msg = f"login {cred.id} changed since it was read"
             raise RecordConflictError(msg)
+        if existing is not None and existing.others:
+            return self._save_group(state, existing, cred, logins)
         base: LoginRecords | None = existing
         if base is None:
             trashed = {p.login.record_name: p for p in self._paired(state, deleted=True)}
@@ -270,6 +295,60 @@ class KeychainClient:
             saves.append((rec, prev_side is None))
         return saves, item.record_name, side_name
 
+    def _save_group(
+        self,
+        state: ZoneState,
+        existing: StoredLogin,
+        cred: Credential,
+        logins: Mapping[str, StoredLogin],
+    ) -> str:
+        """Save a login kept as several records (see `passwords.updated_group`).
+
+        Every record's item goes into the batch, changed or not: the version token covers
+        them all, so each change tag guards the batch against an edit to any of them.
+        """
+        keyring = self._keyring(state)
+        group = passwords.updated_group(
+            [records.login for records in existing.records], cred, self._clock()
+        )
+        saves: list[tuple[ckks.CloudKitRecord, bool]] = []
+        changed = False
+        for records, (login, attrs) in zip(existing.records, group.records, strict=True):
+            if login.record_name not in group.dropped:
+                _refuse_duplicate(cred, attrs.item, login.record_name, logins, group.dropped)
+            changed = self._rewrite(records, attrs, keyring, saves) or changed
+        if not changed:
+            return existing.etag
+        results = self._transport.save_records(saves)
+        _check(results, "saving the login")
+        state = self._record_saved(state, saves, results)
+        saved = self._logins(state).get(cred.id)
+        return saved.etag if saved is not None else ""
+
+    def _rewrite(
+        self,
+        records: LoginRecords,
+        attrs: passwords.LoginAttributes,
+        keyring: pipeline.KeyRing,
+        saves: list[tuple[ckks.CloudKitRecord, bool]],
+    ) -> bool:
+        """Add the saves turning `records` into `attrs`, every record; True if any changes."""
+        login = records.login
+        side_attrs = login.sidecar.attrs if login.sidecar is not None else None
+        side_changed = attrs.sidecar is not None and attrs.sidecar != side_attrs
+        item = pipeline.encrypt_item(
+            attrs.item, login.record_name, self.zone, keyring, previous=records.item
+        )
+        saves.append((item, False))
+        side_name = _sidecar_name(attrs, records.sidecar)
+        # An unchanged sidecar is rewritten too, so its change tag guards the batch.
+        if side_name is not None and attrs.sidecar is not None:
+            side = pipeline.encrypt_item(
+                attrs.sidecar, side_name, self.zone, keyring, previous=records.sidecar
+            )
+            saves.append((side, records.sidecar is None))
+        return side_changed or attrs.item != login.item.attrs
+
     def _record_saved(
         self,
         state: ZoneState,
@@ -303,20 +382,23 @@ class KeychainClient:
         if etag is not None and existing.etag != etag:
             msg = f"login {item_id} changed since it was read"
             raise RecordConflictError(msg)
-        trashed = passwords.moved_login(existing.login, self._clock(), deleted=True)
+        now = self._clock()
         keyring = self._keyring(state)
-        moves = [(trashed.item, existing.item)]
-        if trashed.sidecar is not None and existing.sidecar is not None:
-            moves.append((trashed.sidecar, existing.sidecar))
-        saves = [
-            (
-                pipeline.encrypt_item(
-                    moved.attrs, moved.record_name, self.zone, keyring, previous=previous
-                ),
-                False,
+        saves: list[tuple[ckks.CloudKitRecord, bool]] = []
+        for records in existing.records:
+            trashed = passwords.moved_login(records.login, now, deleted=True)
+            moves = [(trashed.item, records.item)]
+            if trashed.sidecar is not None and records.sidecar is not None:
+                moves.append((trashed.sidecar, records.sidecar))
+            saves.extend(
+                (
+                    pipeline.encrypt_item(
+                        moved.attrs, moved.record_name, self.zone, keyring, previous=previous
+                    ),
+                    False,
+                )
+                for moved, previous in moves
             )
-            for moved, previous in moves
-        ]
         results = self._transport.save_records(saves)
         _check(results, "deleting the login")
         self._record_saved(state, saves, results)
@@ -327,15 +409,23 @@ def _refuse_duplicate(
     item: passwords.Attributes,
     record_name: str,
     logins: Mapping[str, StoredLogin],
+    leaving: frozenset[str] = frozenset(),
 ) -> None:
-    """Refuse a save giving `item` the primary key of another stored login."""
+    """Refuse a save giving `item` the primary key of another stored record.
+
+    `leaving` names records the same batch moves to Recently Deleted.
+    """
     key = passwords.primary_key(item)
-    for other in logins.values():
-        if other.item.record_name != record_name and (
-            passwords.primary_key(other.login.item.attrs) == key
-        ):
-            msg = f"another login for {cred.username!r} on {cred.url} already exists"
-            raise passwords.DuplicateLoginError(msg)
+    for login in logins.values():
+        for other in login.records:
+            name = other.login.record_name
+            if (
+                name != record_name
+                and name not in leaving
+                and passwords.primary_key(other.login.item.attrs) == key
+            ):
+                msg = f"another login for {cred.username!r} on {cred.url} already exists"
+                raise passwords.DuplicateLoginError(msg)
 
 
 def _sidecar_name(

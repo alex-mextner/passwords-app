@@ -206,6 +206,25 @@ def registrable_domain(host: str) -> str:
     return name if private is None else str(private)
 
 
+def url_domain(raw_url: str) -> str:
+    """`registrable_domain` of a URL's host; the trimmed, lowercased text when it has none."""
+    try:
+        return registrable_domain(_parse(raw_url).host)
+    except ValueError:
+        return raw_url.strip().lower()
+
+
+def site_key(raw_url: str) -> str:
+    """`normalize_url`, or the trimmed, lowercased text: equal for spellings of one website.
+
+    `example.com`, `https://example.com/` and `https://EXAMPLE.com` are one website.
+    """
+    try:
+        return normalize_url(raw_url)
+    except ValueError:
+        return raw_url.strip().lower()
+
+
 def _strip_www(host: str) -> str:
     # `www.ck` and `ck` are different owners when the remainder is itself a public suffix.
     if host.startswith("www.") and _PSL.privatesuffix(host[4:]) is not None:
