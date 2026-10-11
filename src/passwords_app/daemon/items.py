@@ -168,36 +168,72 @@ def _optional(
     return current if value is None else (value or None)
 
 
+def _resolved_url(fields: Mapping[str, str | tuple[str, ...]], current: str | None) -> str:
+    url = _text(fields, "url")
+    return _required(fields, "url", current) if url is None else _url(url, "url")
+
+
+def _resolved_otpauth(
+    fields: Mapping[str, str | tuple[str, ...]], current: str | None
+) -> str | None:
+    otpauth = _optional(fields, "otpauth", current)
+    if otpauth is not None and "otpauth" in fields:
+        _check_otpauth(otpauth)
+    return otpauth
+
+
+def _resolved_alt_urls(
+    fields: Mapping[str, str | tuple[str, ...]], current: tuple[str, ...]
+) -> tuple[str, ...]:
+    alt = fields.get("alt_urls")
+    return _alt_urls(alt) if isinstance(alt, tuple) else current
+
+
+def _created(
+    fields: Mapping[str, str | tuple[str, ...]], *, new_id: str, now: datetime
+) -> Credential:
+    otpauth = _resolved_otpauth(fields, None)
+    return Credential(
+        id=new_id,
+        url=_resolved_url(fields, None),
+        username=_optional(fields, "username", "") or "",
+        password=_required(fields, "password", None),
+        created=now,
+        modified=now,
+        title=_optional(fields, "title", None),
+        notes=_optional(fields, "notes", None),
+        otpauth=otpauth,
+        alt_urls=_resolved_alt_urls(fields, ()),
+        group=_optional(fields, "group", None),
+    )
+
+
+def _edited(fields: Mapping[str, str | tuple[str, ...]], existing: Credential) -> Credential:
+    """`existing` with `fields` applied; `modified` is left for the caller to bump."""
+    otpauth = _resolved_otpauth(fields, existing.otpauth)
+    return dataclasses.replace(
+        existing,
+        url=_resolved_url(fields, existing.url),
+        username=_optional(fields, "username", existing.username) or "",
+        password=_required(fields, "password", existing.password),
+        title=_optional(fields, "title", existing.title),
+        notes=_optional(fields, "notes", existing.notes),
+        otpauth=otpauth,
+        alt_urls=_resolved_alt_urls(fields, existing.alt_urls),
+        group=_optional(fields, "group", existing.group),
+    )
+
+
 def apply_edit(
     edit: ItemEdit, existing: Credential | None, *, new_id: str, now: datetime
 ) -> Credential:
     """Return the credential `edit` produces; `existing` is the item with `edit.item_id`."""
-    if existing is not None and existing.id != edit.item_id:
+    if existing is None:
+        return _created(edit.fields, new_id=new_id, now=now)
+    if existing.id != edit.item_id:
         msg = "existing credential does not match the edited id"
         raise ValueError(msg)
-    f = edit.fields
-    url = _text(f, "url")
-    otpauth = _optional(f, "otpauth", existing.otpauth if existing else None)
-    if otpauth is not None and "otpauth" in f:
-        _check_otpauth(otpauth)
-    alt = f.get("alt_urls")
-    edited = Credential(
-        id=existing.id if existing else new_id,
-        url=_url(url, "url")
-        if url is not None
-        else _required(f, "url", None if existing is None else existing.url),
-        username=_optional(f, "username", existing.username if existing else "") or "",
-        password=_required(f, "password", existing.password if existing else None),
-        created=existing.created if existing else now,
-        modified=existing.modified if existing else now,
-        title=_optional(f, "title", existing.title if existing else None),
-        notes=_optional(f, "notes", existing.notes if existing else None),
-        otpauth=otpauth,
-        alt_urls=_alt_urls(alt)
-        if isinstance(alt, tuple)
-        else (existing.alt_urls if existing else ()),
-        group=_optional(f, "group", existing.group if existing else None),
-    )
-    if existing is None or edited.content_hash() == existing.content_hash():
-        return existing or edited
+    edited = _edited(edit.fields, existing)
+    if edited.content_hash() == existing.content_hash():
+        return existing
     return dataclasses.replace(edited, modified=now)

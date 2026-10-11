@@ -22,8 +22,8 @@ from passwords_app.sync.ports import AuthRequired
 
 pytestmark = [pytest.mark.integration, pytest.mark.timeout(60)]
 
-ITEM_PASSWORD = "item-pw-never-logged-7f3a"  # noqa: S105 - fixture value  # gitleaks:allow
-WRONG_PASSWORD = "wrong-apple-pw-9c1d"  # noqa: S105 - fixture value
+ITEM_PASSWORD = "item-pw-never-logged-7f3a"  # gitleaks:allow
+WRONG_PASSWORD = "wrong-apple-pw-9c1d"
 WRONG_PASSCODE = "864209"
 
 

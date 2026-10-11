@@ -123,7 +123,7 @@ async def lock_keyring(address: str, store: SecretServiceStore) -> None:
 async def test_locking_the_keyring_stops_serving_cached_passwords(
     private_bus: str, served: Served
 ) -> None:
-    assert (await served.daemon.get("A")).password == "pw-A"  # noqa: S105 - now cached
+    assert (await served.daemon.get("A")).password == "pw-A"
     await lock_keyring(private_bus, served.store)
     await wait_for(lambda: locked_out(served.daemon))
     with pytest.raises(LockedError):
@@ -135,4 +135,4 @@ async def test_items_come_back_after_unlocking(private_bus: str, served: Served)
     await lock_keyring(private_bus, served.store)
     await wait_for(lambda: locked_out(served.daemon))
     await unlock_collection(private_bus, LOGIN_COLLECTION)
-    assert (await served.daemon.get("A")).password == "pw-A"  # noqa: S105
+    assert (await served.daemon.get("A")).password == "pw-A"

@@ -27,7 +27,7 @@ if TYPE_CHECKING:
     from passwords_app.sync.ports import RemoteStore
 
 APPLE_ID = "alice@example.com"
-APPLE_PASSWORD = "apple-password-for-tests"  # noqa: S105 - fake account
+APPLE_PASSWORD = "apple-password-for-tests"
 CODE = "314159"
 PASSCODE = "271828"
 DEVICES = (

@@ -27,7 +27,7 @@ from passwords_app.daemon.items import (
 NOW = datetime(2026, 5, 1, 12, 0, tzinfo=UTC)
 OTPAUTH = otpauth_uri(issuer="Example")
 NEW_ID = "00000000-0000-4000-8000-000000000001"
-SECRET_PW = "correct-horse-battery"  # noqa: S105 - test data
+SECRET_PW = "correct-horse-battery"
 
 
 def plain(d: dict[str, Variant]) -> dict[str, Any]:
@@ -86,7 +86,7 @@ def test_item_dict_without_secrets_has_exactly_the_public_keys() -> None:
 def test_item_dict_with_secrets_adds_password_and_otpauth() -> None:
     c = make_credential("A", otpauth=OTPAUTH)
     d = plain(item_dict(c, secrets=True))
-    assert d["password"] == "pw-A"  # noqa: S105 - test data
+    assert d["password"] == "pw-A"
     assert d["otpauth"] == OTPAUTH
 
 

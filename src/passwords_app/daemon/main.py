@@ -112,7 +112,7 @@ async def serve(stop: asyncio.Event) -> int:
         await lock_watch.start()
         await daemon.start()
         watch = await watch_network(system_bus, bus, daemon.scheduler.network_up)
-        _log.info("passwords-appd ready on %s", BUS_NAME)
+        _log.info("daemon ready on %s", BUS_NAME)
         # dbus-fast leaves wait_for_disconnect unannotated; it returns None once closed.
         disconnected = asyncio.ensure_future(
             bus.wait_for_disconnect()  # type: ignore[no-untyped-call]
