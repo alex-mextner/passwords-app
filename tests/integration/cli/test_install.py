@@ -127,7 +127,9 @@ def test_manifest_lists_every_installed_path(env: InstallEnv) -> None:
     assert str(env.home / ".local" / "bin" / "passwords-app") in lines
     assert "docker-container:passwords-app-anisette" in lines
     assert len(lines) == len(set(lines))
-    assert all(os.path.lexists(p) for p in lines if not p.startswith("docker-container:"))
+    # Polkit actions are recorded but installed by the user through the printed pkexec command.
+    files = [p for p in lines if not p.startswith(("docker-container:", "polkit-action:"))]
+    assert all(os.path.lexists(p) for p in files)
 
 
 def test_success_message_points_to_signin(env: InstallEnv) -> None:

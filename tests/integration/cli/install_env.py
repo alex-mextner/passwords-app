@@ -172,13 +172,34 @@ class InstallEnv:
         return result
 
 
+# The GTK app and browser branches ship these under data/; the installer tests start from the
+# daemon-only layout and opt into stand-ins through the `with_app_files` fixture instead.
+_APP_DATA_DIRS = frozenset(
+    {
+        "applications",
+        "metainfo",
+        "icons",
+        "glib-2.0",
+        "polkit",
+        "search-providers",
+        "native-messaging",
+    }
+)
+
+
+def _skip_app_data(directory: str, names: list[str]) -> frozenset[str]:
+    if Path(directory) != REPO / "data":
+        return frozenset()
+    return _APP_DATA_DIRS.intersection(names)
+
+
 def make_env(root: Path) -> InstallEnv:
     home = root / "home"
     home.mkdir()
     checkout = root / "checkout"
     checkout.mkdir()
-    for name in ("scripts", "data"):
-        shutil.copytree(REPO / name, checkout / name)
+    shutil.copytree(REPO / "scripts", checkout / "scripts")
+    shutil.copytree(REPO / "data", checkout / "data", ignore=_skip_app_data)
     shutil.copy(REPO / "pyproject.toml", checkout / "pyproject.toml")
     fakebin = root / "fakebin"
     fakebin.mkdir()
