@@ -13,6 +13,8 @@ launcher sets them before calling the unmodified `passwords_app.daemon.main.main
   "2 s after a local change" happen within a test's patience; their logic is untouched.
 - The wall clock is shifted by the number of days in `clock_file` (re-read on every call),
   so "90 days later" is a file write, not a wait. The monotonic clock is the real one.
+- Log lines start with a UTC timestamp (the daemon leaves timestamps to the journal), like
+  the native host's (tests/browser/native_host_shim.py), so the two logs line up.
 
 Everything else (stores, sync engine, policy, D-Bus service) is production code.
 Usage: `python tests/e2e/daemon_shim.py <config.json>`.
@@ -23,12 +25,14 @@ from __future__ import annotations
 import dataclasses
 import functools
 import json
+import logging
 import sys
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import TYPE_CHECKING, override
 
 import requests
+from tests.browser.native_host_shim import configure_logging
 
 from passwords_app.daemon import main as daemon_main
 from passwords_app.daemon import scheduler
@@ -104,6 +108,8 @@ def configure(config: dict[str, object]) -> None:
 def main(argv: list[str]) -> int:
     config = json.loads(Path(argv[1]).read_text(encoding="utf-8"))
     configure(config)
+    # First, so the daemon's own basicConfig (same level with --debug) is a no-op.
+    configure_logging(logging.DEBUG)
     return daemon_main.main(["--debug"])
 
 

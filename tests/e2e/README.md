@@ -18,3 +18,9 @@ built (`cd extension && bun install && bun scripts/build.ts`).
 
 Proof: captures go to `docs/proof/raw/e2e/` (ignored); set
 `PASSWORDS_APP_E2E_PROOF_DIR=docs/proof/e2e` to refresh the committed proof.
+
+Logs: at teardown every test copies each daemon run's log (`passwords-appd-N.log`) and each
+browser's native host log (`native-host-<browser>.log`, one timestamped line per extension
+request, from `tests/browser/native_host_shim.py`) to `docs/proof/raw/e2e/logs/<test>/`. CI
+uploads that directory with the `e2e-proof` artifact, so a failed scenario can be read there.
+A missing native host log means the extension never asked its host.

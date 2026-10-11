@@ -8,7 +8,8 @@ Pieces:
   is testable. Browsers map the fictional host names to it (`network.dns.localDomains`,
   `--host-resolver-rules`) and accept its self-signed certificate.
 - `install_native_host`: a wrapper script that starts the real host on the private bus, plus
-  the browser's native messaging manifest pointing at it (rendered by `manifests`).
+  the browser's native messaging manifest pointing at it (rendered by `manifests`). The host
+  runs through `native_host_shim.py`, which logs every request, into `<home>/native-host.log`.
 - `FirefoxSession` (Selenium + geckodriver, temporary add-on) and `ChromiumSession`
   (Playwright, `--load-extension`) behind the same small `Page` API the scenarios use.
 
@@ -45,6 +46,9 @@ if TYPE_CHECKING:
 REPO: Final = Path(__file__).resolve().parents[2]
 EXTENSION: Final = REPO / "extension"
 PAGES: Final = Path(__file__).resolve().parent / "pages"
+NATIVE_HOST_SHIM: Final = Path(__file__).resolve().parent / "native_host_shim.py"
+# Where `install_native_host` leaves the host's stderr, relative to the browser's HOME.
+NATIVE_HOST_LOG: Final = "native-host.log"
 PROOF: Final = REPO / "docs" / "proof" / "browser"
 
 NORTHWIND: Final = "login.northwind.example"
@@ -232,7 +236,7 @@ def install_native_host(
         "#!/bin/sh\n"
         f"export DBUS_SESSION_BUS_ADDRESS='{bus_address}'\n"
         f"export PYTHONPATH='{REPO / 'src'}'\n"
-        f"exec '{sys.executable}' -m passwords_app.browser.native_host \"$@\"\n",
+        f"exec '{sys.executable}' '{NATIVE_HOST_SHIM}' \"$@\" 2>>'{home / NATIVE_HOST_LOG}'\n",
         encoding="utf-8",
     )
     wrapper.chmod(0o755)
