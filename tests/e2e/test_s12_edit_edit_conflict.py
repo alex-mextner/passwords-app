@@ -12,7 +12,7 @@ from typing import TYPE_CHECKING
 
 import pytest
 from tests.e2e.apple import login
-from tests.e2e.stack import SurfaceTimeoutError, pump, wait_until
+from tests.e2e.stack import pump, wait_until
 
 if TYPE_CHECKING:
     from tests.e2e.stack import Stack
@@ -68,11 +68,6 @@ def test_s12_newer_edit_wins_and_the_other_is_kept(stack: Stack, newer: str) -> 
     stack.assert_no_duplicates()
 
 
-@pytest.mark.xfail(
-    strict=True,
-    raises=(SurfaceTimeoutError, AssertionError),
-    reason="#66: restoring a login whose site and username exist leaves sync 'offline'",
-)
 def test_s12_restoring_the_conflict_loser_reaches_icloud(stack: Stack) -> None:
     seeded = stack.seeded["contoso"]
     _winner, loser = _conflicting_edits(stack, "iphone")
@@ -82,6 +77,10 @@ def test_s12_restoring_the_conflict_loser_reaches_icloud(stack: Stack) -> None:
     wait_until(
         lambda: (i := stack.keyring.by_id(restored_id)) and i.secret == loser,
         what="the restored version in the keyring",
+    )
+    wait_until(
+        lambda: (held := stack.apple.get(restored_id)) and held.password == loser,
+        what="the restored version in iCloud",
     )
     # Later changes keep flowing to iCloud, and the status does not claim to be offline.
     later = login("https://news.tailspin.example", "reader", "FAKE-made-after-restore")
