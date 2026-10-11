@@ -275,16 +275,20 @@ def _link_pairs(
     pairs: list[tuple[str, str]] = []
     for lid in local_new:
         key = _link_key(local[lid])
-        matches = candidates.get(key) if key is not None else None
-        if not matches:
-            continue
-        # A copy forked from an iCloud item (see `ForkLocal`) shares its link key, but is the
-        # version that lost the id, waiting for its own upload: linking it back would trash it.
-        rid = next((r for r in matches if lid != fork_id(r, local[lid])), None)
+        rid = _take_match(lid, local[lid], candidates.get(key)) if key is not None else None
         if rid is not None:
-            matches.remove(rid)
             pairs.append((lid, rid))
     return pairs
+
+
+def _take_match(lid: str, loc: Credential, matches: deque[str] | None) -> str | None:
+    """Remove and return the first remote id in `matches` that `loc` may link to."""
+    # A copy forked from an iCloud item (see `ForkLocal`) shares its link key, but is the
+    # version that lost the id, waiting for its own upload: linking it back would trash it.
+    rid = next((r for r in matches or () if lid != fork_id(r, loc)), None)
+    if rid is not None and matches is not None:
+        matches.remove(rid)
+    return rid
 
 
 def _too_many(policy: SyncPolicy, count: int, items: int) -> bool:
@@ -423,13 +427,20 @@ class _Planner:
         if not remote_changed and not local_changed:
             if item.etag != b.etag:
                 self.emit(item_id, SetBase(item.credential, item.etag))
-        elif remote_changed and not local_changed:
+        elif not local_changed:
             self.emit(item_id, UpdateLocal(item.credential, item.etag))
-        elif local_changed and not remote_changed:
+        elif not remote_changed:
             self.emit(item_id, UpdateRemote(loc, item.etag))
-        elif rkey == lkey:
+        else:
+            self.both_changed(item_id, item, loc, local_wins=restored)
+
+    def both_changed(
+        self, item_id: str, item: RemoteItem, loc: Credential, *, local_wins: bool
+    ) -> None:
+        """Resolve an edit on both sides; `local_wins` overrides the newer-wins rule."""
+        if content_key(item.credential) == content_key(loc):
             self.emit(item_id, SetBase(item.credential, item.etag))
-        elif restored or loc.modified > item.credential.modified:
+        elif local_wins or loc.modified > item.credential.modified:
             self.emit(item_id, Trash(item.credential, "conflict"), UpdateRemote(loc, item.etag))
         else:
             # Ties go to iCloud: it is the copy every other device already sees.
