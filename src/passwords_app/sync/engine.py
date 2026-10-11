@@ -32,8 +32,8 @@ from passwords_app.sync.plan import (
     DeleteLocal,
     DeleteRemote,
     DropBase,
-    ForkLocal,
     Link,
+    MergeLocal,
     PauseDecision,
     SetBase,
     SyncPlan,
@@ -343,7 +343,7 @@ class SyncEngine:
         """Apply one store write; return the skip reason that ends the cycle, if any."""
         try:
             match action:
-                case Trash() | CreateLocal() | UpdateLocal() | DeleteLocal() | ForkLocal():
+                case Trash() | CreateLocal() | UpdateLocal() | DeleteLocal() | MergeLocal():
                     await self._apply_local(action, run)
                 case _:
                     await self._apply_remote(action, run)
@@ -363,7 +363,7 @@ class SyncEngine:
         return None
 
     async def _apply_local(
-        self, action: Trash | CreateLocal | UpdateLocal | DeleteLocal | ForkLocal, run: _Pass
+        self, action: Trash | CreateLocal | UpdateLocal | DeleteLocal | MergeLocal, run: _Pass
     ) -> None:
         state, local, counts = self._state, self._local, run.counts
         match action:
@@ -383,9 +383,12 @@ class SyncEngine:
                 await local.delete(item_id, expected=run.expected(item_id))
                 state.drop_base(item_id)
                 counts["deleted_local"] += 1
-            case ForkLocal(credential, _):
+            case MergeLocal(local_id, credential):
+                # Write before delete, as for `Link`: a crash in between leaves a duplicate
+                # the next cycle merges again, never a loss.
                 await local.upsert(credential, expected=run.expected(credential.id))
-                counts["created_local"] += 1
+                await local.delete(local_id, expected=run.expected(local_id))
+                counts["updated_local"] += 1
             case _:
                 assert_never(action)
 

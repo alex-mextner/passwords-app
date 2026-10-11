@@ -247,6 +247,48 @@ async def test_s12_conflict_does_not_repeat_on_next_cycle(w: World) -> None:
     assert len(w.engine.trash()) == 1
 
 
+async def test_same_id_created_on_both_sides_keeps_one_login_and_trashes_the_other(
+    w: World,
+) -> None:
+    # #71: no keyring-only fork copy, which iCloud would refuse as a duplicate login.
+    iphone = at(make_credential("A"), 1, password="fake-iphone")
+    linux = at(iphone, 2, password="fake-linux")
+    w.remote.put(iphone)
+    w.local.put(linux)
+    report = await w.engine.run_once()
+    assert report.conflicts == 1
+    assert set(w.remote.items) == set(w.local.items) == {"A"}
+    assert w.remote.items["A"].credential == linux
+    assert w.converged()
+    assert [e.credential for e in w.engine.trash()] == [iphone]
+
+
+async def test_a_newer_keyring_duplicate_replaces_its_login_everywhere(w: World) -> None:
+    a = make_credential("A")
+    await synced(w, a)
+    seahorse = at(dataclasses.replace(a, id="B"), 5, password="fake-seahorse")
+    w.local.put(seahorse)
+    await w.engine.run_once()
+    await w.engine.run_once()
+    assert set(w.remote.items) == set(w.local.items) == {"A"}
+    assert w.remote.items["A"].credential == dataclasses.replace(seahorse, id="A")
+    assert w.converged()
+    assert [e.credential for e in w.engine.trash()] == [a]
+    report = await w.engine.run_once()
+    assert (report.conflicts, report.updated_remote, report.deleted_local) == (0, 0, 0)
+
+
+async def test_an_older_keyring_duplicate_goes_to_trash(w: World) -> None:
+    a = at(make_credential("A"), 5)
+    await synced(w, a)
+    seahorse = at(dataclasses.replace(a, id="B"), 1, password="fake-seahorse")
+    w.local.put(seahorse)
+    await w.engine.run_once()
+    assert set(w.remote.items) == set(w.local.items) == {"A"}
+    assert w.remote.items["A"].credential == a
+    assert [e.credential for e in w.engine.trash()] == [seahorse]
+
+
 async def test_s13_edit_on_linux_beats_delete_on_apple(w: World) -> None:
     a = make_credential("A")
     await synced(w, a)
@@ -1088,17 +1130,6 @@ async def test_s24_identical_items_link_without_trash(w: World) -> None:
     assert set(w.local.items) == {"R"}
 
 
-async def test_same_id_different_content_without_base_keeps_both(w: World) -> None:
-    w.remote.put(make_credential("X", password="fake-remote"))
-    w.local.put(make_credential("X", password="fake-local"))
-    await w.engine.run_once()
-    assert w.converged()
-    passwords = sorted(c.password for c in w.local.items.values())
-    assert passwords == ["fake-local", "fake-remote"]
-    assert w.local.items["X"].password == "fake-remote"
-    assert (await w.engine.run_once()).created_remote == 0
-
-
 async def test_s24_link_interrupted_before_removing_the_old_item_finishes_next_cycle(
     w: World,
 ) -> None:
@@ -1187,9 +1218,9 @@ async def test_interrupted_link_keeps_the_keyring_version_in_trash(w: World) -> 
     assert [e.credential.notes for e in w.engine.trash()] == ["only on Linux"]
 
 
-async def test_edit_during_fork_upload_survives(w: World) -> None:
+async def test_edit_during_conflict_upload_survives(w: World) -> None:
     w.remote.put(make_credential("X", password="fake-remote"))
-    w.local.put(make_credential("X", password="fake-local"))
+    w.local.put(make_credential("X", password="fake-local", modified=300))
 
     async def user_edits_original(_: str) -> None:
         w.remote.on_write = None

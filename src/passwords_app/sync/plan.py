@@ -16,18 +16,18 @@ from __future__ import annotations
 import dataclasses
 import hashlib
 import operator
-import uuid
 from collections import deque
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Literal
 
 from passwords_app.core.model import Credential, TrashReason
-from passwords_app.core.urls import link_host, site_key
+from passwords_app.core.urls import link_host, login_identity, site_key
 from passwords_app.sync.ports import PendingDeletions
 
 if TYPE_CHECKING:
     from collections.abc import Callable, Mapping
 
+    from passwords_app.core.urls import LoginIdentity
     from passwords_app.sync.ports import LocalSnapshot, RemoteItem, RemoteSnapshot, SyncPolicy
 
 
@@ -71,15 +71,17 @@ class DeleteLocal:
 
 
 @dataclass(frozen=True, slots=True)
-class ForkLocal:
-    """Save a local version under a fresh id before its original id is overwritten.
+class MergeLocal:
+    """Move the keyring item `local_id` onto `credential.id`, its twin's id; base untouched.
 
-    Used when both sides created different content under the same id without a base: the
-    spec keeps both, so the local one moves aside (and is then pushed with `CreateRemote`).
+    iCloud Keychain keeps one login per site and username, so a newer keyring duplicate of
+    a login can only reach iCloud as that login's new version: written over the twin in the
+    keyring, then uploaded by an `UpdateRemote` that records the base; a failed upload is
+    planned again next cycle from the keyring version.
     """
 
+    local_id: str
     credential: Credential
-    source_id: str
 
     @property
     def item_id(self) -> str:
@@ -167,7 +169,7 @@ type Action = (
     CreateLocal
     | UpdateLocal
     | DeleteLocal
-    | ForkLocal
+    | MergeLocal
     | CreateRemote
     | UpdateRemote
     | DeleteRemote
@@ -178,7 +180,7 @@ type Action = (
 )
 
 
-_KEYRING_WRITES = (CreateLocal, UpdateLocal, DeleteLocal, ForkLocal, Link)
+_KEYRING_WRITES = (CreateLocal, UpdateLocal, DeleteLocal, MergeLocal, Link)
 
 
 @dataclass(frozen=True, slots=True)
@@ -212,16 +214,7 @@ _CONTENT_FIELDS = tuple(
 )
 content_key: Callable[[Credential], ContentKey] = operator.attrgetter(*_CONTENT_FIELDS)
 
-# Fixed namespace so a forked id is a pure function of (original id, local content): a
-# retried cycle forks to the same id instead of piling up copies.
-_FORK_NAMESPACE = uuid.UUID("6f1d3c2e-8b4a-5e7f-9a01-2c3d4e5f6a7b")
-
 type _Side = Literal["local", "remote"]
-
-
-def fork_id(source_id: str, credential: Credential) -> str:
-    """Deterministic id for the local copy kept when both sides created the same id."""
-    return str(uuid.uuid5(_FORK_NAMESPACE, f"{source_id}/{credential.content_hash()}")).upper()
 
 
 def trash_id(credential: Credential, reason: TrashReason) -> str:
@@ -275,20 +268,34 @@ def _link_pairs(
     pairs: list[tuple[str, str]] = []
     for lid in local_new:
         key = _link_key(local[lid])
-        rid = _take_match(lid, local[lid], candidates.get(key)) if key is not None else None
-        if rid is not None:
-            pairs.append((lid, rid))
+        matches = candidates.get(key) if key is not None else None
+        if matches:
+            pairs.append((lid, matches.popleft()))
     return pairs
 
 
-def _take_match(lid: str, loc: Credential, matches: deque[str] | None) -> str | None:
-    """Remove and return the first remote id in `matches` that `loc` may link to."""
-    # A copy forked from an iCloud item (see `ForkLocal`) shares its link key, but is the
-    # version that lost the id, waiting for its own upload: linking it back would trash it.
-    rid = next((r for r in matches or () if lid != fork_id(r, loc)), None)
-    if rid is not None and matches is not None:
-        matches.remove(rid)
-    return rid
+def _login_twins(remote: Mapping[str, RemoteItem]) -> dict[LoginIdentity, list[str]]:
+    """Group iCloud item ids by the identity iCloud Keychain keeps one login of."""
+    twins: dict[LoginIdentity, list[str]] = {}
+    for rid in sorted(remote):
+        identity = login_identity(remote[rid].credential)
+        if identity is not None:
+            twins.setdefault(identity, []).append(rid)
+    return twins
+
+
+def _only_twin(dup: Credential, ids: list[str], remote: Mapping[str, RemoteItem]) -> str | None:
+    """Pick the one iCloud login among `ids` that `dup` collides with, else None.
+
+    `login_identity` treats a written default port as none, so `https://x` and
+    `https://x:443` share it while iCloud keeps them apart: the written port decides, and an
+    item matching none or several of them is no one's duplicate.
+    """
+    if len(ids) == 1:
+        return ids[0]
+    exact = login_identity(dup, exact_port=True)
+    same = [i for i in ids if login_identity(remote[i].credential, exact_port=True) == exact]
+    return same[0] if len(same) == 1 else None
 
 
 def _covered(record: Credential, login: Credential) -> bool:
@@ -345,17 +352,73 @@ class _Planner:
         # Each group is one item's actions; deletions are tagged so the guard can hold them.
         self.groups: list[tuple[tuple[Action, ...], _Side | None, str]] = []
 
-    def _preserved(self, copy: Credential) -> bool:
-        """Whether a store already holds `copy`'s content under `copy.id`."""
-        key = content_key(copy)
-        held = self.local.get(copy.id)
-        item = self.remote.get(copy.id)
-        return (held is not None and content_key(held) == key) or (
-            item is not None and content_key(item.credential) == key
-        )
-
     def emit(self, item_id: str, *actions: Action, deletes: _Side | None = None) -> None:
         self.groups.append((actions, deletes, item_id))
+
+    def merge_duplicates(self, settled: set[str]) -> None:
+        """Resolve new keyring logins that duplicate an iCloud login's site and username.
+
+        iCloud refuses a second login for the same site and username, so uploading one would
+        fail forever (#71): the newer version takes the iCloud login's id and the other goes
+        to trash. Every id resolved here is added to `settled` and skipped for this cycle.
+        """
+        new = {
+            lid: identity
+            for lid in sorted(self.local)
+            if lid not in self.base and lid not in self.remote and lid not in settled
+            if (identity := login_identity(self.local[lid])) is not None
+        }
+        # Indexing every iCloud login costs a URL parse each: only when a candidate exists.
+        twins = _login_twins(self.remote) if new else {}
+        for lid, identity in new.items():
+            twin = self._twin(lid, identity, twins)
+            if twin is None:
+                continue
+            settled.add(lid)
+            if twin not in settled:
+                # Otherwise another duplicate replaced the twin this cycle; this one waits.
+                self.merge(lid, twin, settled)
+
+    def _twin(
+        self, lid: str, identity: LoginIdentity, twins: Mapping[LoginIdentity, list[str]]
+    ) -> str | None:
+        """Return the iCloud login the new keyring item `lid` duplicates, if it should merge."""
+        ids = twins.get(identity)
+        twin = _only_twin(self.local[lid], ids, self.remote) if ids else None
+        if twin is None:
+            return None
+        held = self.local.get(twin)
+        # A twin deleted on this side is about to be deleted in iCloud too, and one edited
+        # to another site no longer collides: either way the duplicate uploads on its own.
+        if held is None:
+            return None if twin in self.base else twin
+        return twin if login_identity(held) == identity else None
+
+    def merge(self, lid: str, rid: str, settled: set[str]) -> None:
+        dup = self.local[lid]
+        item = self.remote[rid]
+        current = self.local.get(rid) or item.credential
+        # A login the user restored from trash is their explicit choice and stays.
+        dup_wins = lid in self.restored or (
+            rid not in self.restored and dup.modified > current.modified
+        )
+        if not dup_wins or content_key(dup) == content_key(current):
+            # Ties go to the login iCloud already holds, as in `both_changed`.
+            self.emit(lid, Trash(dup, "conflict"), DeleteLocal(lid))
+        elif self._quiet(rid):
+            settled.add(rid)
+            winner = dataclasses.replace(dup, id=rid)
+            # Separate groups: the upload must not sit between the keyring writes.
+            self.emit(rid, Trash(current, "conflict"), MergeLocal(lid, winner))
+            self.emit(rid, UpdateRemote(winner, item.etag))
+        # Otherwise the twin's own versions are resolved first; the duplicate waits.
+
+    def _quiet(self, rid: str) -> bool:
+        """Whether `current` in `merge` is the only version of `rid` the upload replaces."""
+        b = self.base.get(rid)
+        if b is None:
+            return rid not in self.local
+        return content_key(self.remote[rid].credential) == content_key(b.credential)
 
     def link(self, lid: str, rid: str) -> None:
         item = self.remote[rid]
@@ -371,23 +434,10 @@ class _Planner:
         if item is not None and loc is not None:
             if content_key(item.credential) == content_key(loc):
                 self.emit(item_id, Link(item_id, item.credential, item.etag))
-                return
-            copy = dataclasses.replace(loc, id=fork_id(item_id, loc))
-            if (
-                copy.id not in self.local
-                and copy.id not in self.remote
-                and copy.id not in self.base
-            ):
-                # Separate groups: the upload must not sit between the keyring writes.
-                self.emit(copy.id, ForkLocal(copy, item_id))
-                self.emit(copy.id, CreateRemote(copy))
-                self.emit(item_id, UpdateLocal(item.credential, item.etag))
-            elif self._preserved(copy):
-                self.emit(item_id, UpdateLocal(item.credential, item.etag))
             else:
-                # The copy from an interrupted cycle was edited since, so it no longer
-                # preserves this version: keep the version in trash instead.
-                self.emit(item_id, Trash(loc, "conflict"), UpdateLocal(item.credential, item.etag))
+                # Both sides created the id: iCloud fits one login per site and username,
+                # so the newer version wins as for an edit on both sides (#71).
+                self.both_changed(item_id, item, loc, local_wins=False)
         elif item is not None:
             self.emit(item_id, CreateLocal(item.credential, item.etag))
         elif loc is not None:
@@ -562,14 +612,15 @@ def plan(  # noqa: PLR0913 - the pause state is part of what decides deletions
     planner.restored = restored
     absorbed = planner.absorb(remote.merged)
     unabsorbed = {i: c for i, c in local.items.items() if i not in absorbed}
-    linked: set[str] = set(absorbed)
+    settled: set[str] = set(absorbed)
     for lid, rid in _link_pairs(base, remote.items, unabsorbed):
         planner.link(lid, rid)
-        linked.add(lid)
-        linked.add(rid)
+        settled.add(lid)
+        settled.add(rid)
+    planner.merge_duplicates(settled)
 
     for item_id in sorted(base.keys() | remote.items.keys() | local.items.keys()):
-        if item_id in linked:
+        if item_id in settled:
             continue
         b = base.get(item_id)
         item = remote.items.get(item_id)

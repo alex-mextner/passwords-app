@@ -13,6 +13,7 @@ from passwords_app.sync.plan import (
     BaseEntry,
     CreateLocal,
     CreateRemote,
+    DeleteLocal,
     Link,
     SyncPlan,
     Trash,
@@ -64,18 +65,15 @@ def test_same_login_written_differently_is_linked(local_url: str, remote_url: st
     assert not any(isinstance(a, (CreateLocal, CreateRemote)) for a in result.actions)
 
 
-# Different site, username, or password: these are different logins and both survive.
+# Different site or username: these are different logins and both survive.
 NOT_SAME = [
     (login("https://example.com"), login("https://example.org")),
     (login("https://example.com"), login("https://mail.example.com")),
     (login("https://a.github.io"), login("https://b.github.io")),
     (login("https://example.com"), login("https://example.com.evil.com")),
     (login("https://example.com"), login("https://notexample.com")),
-    (login("https://example.com", user="alice"), login("https://example.com", user="Alice")),
     (login("https://example.com", user="alice"), login("https://example.com", user="bob")),
     (login("https://example.com", user=""), login("https://example.com", user="alice")),
-    (login("https://example.com", secret="fake-a"), login("https://example.com", secret="fake-b")),
-    (login("https://example.com", secret="fake-a"), login("https://example.com", secret="fake-a ")),
     (login("https://192.168.1.1"), login("https://192.168.1.2")),
     (login("https://fass.de"), login("https://faß.de")),
     (login("https://evil.com\\@example.com"), login("https://example.com")),
@@ -89,6 +87,28 @@ def test_different_logins_are_both_kept(
     result = first_sync({"R": remote_fields}, {"L": local_fields})
     assert not any(isinstance(a, Link) for a in result.actions)
     assert {type(a) for a in result.actions} == {CreateLocal, CreateRemote}
+
+
+# Same site and username (compared case-insensitively, as iCloud Keychain does) with
+# another password: iCloud keeps one of them, so they are not linked but merged (#71).
+SAME_LOGIN_OTHER_PASSWORD = [
+    (login("https://example.com", user="alice"), login("https://example.com", user="Alice")),
+    (login("https://example.com", secret="fake-a"), login("https://example.com", secret="fake-b")),
+    (login("https://example.com", secret="fake-a"), login("https://example.com", secret="fake-a ")),
+]
+
+
+@pytest.mark.parametrize(("local_fields", "remote_fields"), SAME_LOGIN_OTHER_PASSWORD)
+def test_a_keyring_twin_of_an_icloud_login_is_merged_not_kept(
+    local_fields: dict[str, Any], remote_fields: dict[str, Any]
+) -> None:
+    result = first_sync({"R": remote_fields}, {"L": local_fields})
+    # Equal timestamps: the version iCloud already holds wins.
+    assert set(result.actions) == {
+        Trash(make_credential("L", **local_fields), "conflict"),
+        DeleteLocal("L"),
+        CreateLocal(make_credential("R", **remote_fields), "e-R"),
+    }
 
 
 def test_link_with_differing_extras_keeps_the_keyring_version_in_trash() -> None:
@@ -128,7 +148,8 @@ def test_one_remote_matches_only_one_local() -> None:
     same = login("https://example.com")
     result = first_sync({"R": same}, {"A": same, "B": same})
     assert sum(isinstance(a, Link) for a in result.actions) == 1
-    assert [a.item_id for a in result.actions if isinstance(a, CreateRemote)] == ["B"]
+    # B duplicates the login A is linked to: it waits for the next cycle, not an upload.
+    assert not any(a.item_id == "B" for a in result.actions)
 
 
 def test_already_synced_remote_items_are_not_link_candidates() -> None:
@@ -140,7 +161,11 @@ def test_already_synced_remote_items_are_not_link_candidates() -> None:
         LocalSnapshot({"R": synced, "L": make_credential("L", **same)}),
         POLICY,
     )
-    assert result.actions == (CreateRemote(make_credential("L", **same)),)
+    # Not linked, and not uploaded either: iCloud would refuse a second login (#71).
+    assert result.actions == (
+        Trash(make_credential("L", **same), "conflict"),
+        DeleteLocal("L"),
+    )
 
 
 def test_items_with_unparsable_urls_never_link() -> None:
@@ -196,4 +221,4 @@ def test_same_id_local_with_other_content_is_not_a_link_target() -> None:
         POLICY,
     )
     assert not any(isinstance(a, Link) and a.local_id == "L" for a in result.actions)
-    assert CreateRemote(make_credential("L", **same)) in result.actions
+    assert not any(isinstance(a, CreateRemote) for a in result.actions)
