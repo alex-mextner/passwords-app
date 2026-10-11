@@ -276,8 +276,11 @@ sync links existing Seahorse items · S25 shared-group item read + edit.
   `bun audit`, gitleaks (hook + CI), CodeQL, dependency-review, OpenSSF Scorecard, Dependabot.
   Logs are redacted (no secrets, tokens, or passwords — enforced by a test).
 - Performance budgets (pytest-benchmark, CI-enforced): `plan()` 10k items < 100 ms;
-  keyring fetch 2k items < 2 s; app cold start to first frame < 800 ms; search keystroke on 5k
-  items < 16 ms; native host `Match` p95 < 50 ms; daemon idle RSS < 120 MB.
+  keyring fetch 2k items < 2 s, including the first fetch after a daemon restart (it starts
+  from the item properties state.db keeps), except the one-off first fetch of a collection no
+  store has read yet, < 4 s (gnome-keyring scans every item per property read); app cold
+  start to first frame < 800 ms; search keystroke on 5k items < 16 ms; native host `Match`
+  p95 < 50 ms; daemon idle RSS < 120 MB.
 - Tests ≥ 2000, all meaningful: unit (planner matrix, crypto vectors and round-trips, codec,
   URL matching, mapping, generator, strength, TOTP), integration (real gnome-keyring on a
   private D-Bus, SQLite, daemon D-Bus API, native host), e2e (fake CloudKit server + real

@@ -13,12 +13,14 @@ from dbus_fast import Message, MessageType
 from dbus_fast.aio import MessageBus
 from tests.fakes.memory_stores import MemoryLocal, MemoryRemote, make_credential
 from tests.integration.daemon.support import STATE_KEY, wait_for
+from tests.integration.keyring.support import next_second
 from tests.unit.daemon.fake_clock import FakeClock
 from tests.unit.daemon.fakes import FakeAccount, FakeNotifier
 
 from passwords_app.daemon import BUS_NAME, INTERFACE, OBJECT_PATH, main, paths
 from passwords_app.daemon.account import ICloudAccount
 from passwords_app.daemon.controller import Daemon
+from passwords_app.keyring.secret_service import SAVED_PROPERTIES_KEY, SecretServiceStore
 from passwords_app.store.state import StateStore
 from passwords_app.sync.ports import LocalUnavailable
 
@@ -138,6 +140,28 @@ async def test_build_daemon_uses_the_real_keyring(
     finally:
         await daemon.stop()
         daemon.close()
+
+
+async def test_build_daemon_keeps_what_its_keyring_fetch_read_in_state(
+    private_bus: str, bus: MessageBus, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # A restarted daemon starts from these instead of reading every item in full (#64).
+    await (await SecretServiceStore.open(bus)).upsert(make_credential("FROM-KEYRING"))
+    await next_second()
+    account = FakeAccount(MemoryRemote(), apple_id="a@example.com", signed_in=True, joined=True)
+    monkeypatch.setattr(ICloudAccount, "load", staticmethod(lambda: account))
+    daemon = await main.build_daemon(bus)
+    try:
+        await daemon.start()
+        await daemon.sync_now()
+    finally:
+        await daemon.stop()
+        daemon.close()
+    state = await main.open_state(bus)
+    try:
+        assert "FROM-KEYRING" in (state.get(SAVED_PROPERTIES_KEY) or "")
+    finally:
+        state.close()
 
 
 async def test_serve_exits_for_a_later_restart_when_the_keyring_is_locked(

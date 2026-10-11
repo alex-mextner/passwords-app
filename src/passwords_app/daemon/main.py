@@ -75,7 +75,7 @@ async def build_daemon(bus: MessageBus) -> Daemon:
 
     state = await open_state(bus)
     try:
-        local = await SecretServiceStore.open(bus)
+        local = await SecretServiceStore.open(bus, saved=state)
         account = await asyncio.to_thread(ICloudAccount.load)
     except BaseException:
         state.close()

@@ -1,6 +1,6 @@
 # SPDX-FileCopyrightText: 2026 Alex Mextner
 # SPDX-License-Identifier: MIT
-"""state.db: sync bases, trash, held deletions, and small settings, encrypted per row.
+"""state.db: sync bases, trash, held deletions, small settings and caches, encrypted per row.
 
 Every row that can contain a secret is sealed with AES-256-GCM under a key the caller fetches
 from the Secret Service. The associated data binds each ciphertext to its table, row id, and

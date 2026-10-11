@@ -4,8 +4,10 @@
 
 from __future__ import annotations
 
+import asyncio
 import os
 import signal
+import time
 from dataclasses import replace
 from datetime import UTC, datetime
 from pathlib import Path
@@ -16,6 +18,8 @@ from passwords_app.keyring.client import COLLECTION, ITEM, SecretServiceClient
 
 if TYPE_CHECKING:
     from collections.abc import Mapping
+
+    import pytest
 
 T0 = datetime(2026, 1, 2, 3, 4, 5, tzinfo=UTC)
 T1 = datetime(2026, 6, 7, 8, 9, 10, 123456, tzinfo=UTC)
@@ -44,6 +48,24 @@ async def raw_item(client: SecretServiceClient, path: str) -> tuple[str, dict[st
 
 async def items_of(client: SecretServiceClient, collection: str) -> list[str]:
     return list(await client.get_property(collection, COLLECTION, "Items"))
+
+
+async def next_second() -> None:
+    """Sleep into the next wall-clock second, where gnome-keyring's ``Modified`` ticks."""
+    await asyncio.sleep(1.02 - time.time() % 1)
+
+
+def spy_property_reads(monkeypatch: pytest.MonkeyPatch) -> list[str]:
+    """Record the name of every property `SecretServiceClient` reads from now on."""
+    reads: list[str] = []
+    original = SecretServiceClient.get_property
+
+    async def spy(self: SecretServiceClient, path: str, interface: str, name: str) -> object:
+        reads.append(name)
+        return await original(self, path, interface, name)
+
+    monkeypatch.setattr(SecretServiceClient, "get_property", spy)
+    return reads
 
 
 async def seahorse_create(
