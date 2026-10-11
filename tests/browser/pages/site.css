@@ -1,0 +1,39 @@
+/* SPDX-FileCopyrightText: 2026 Alex Mextner */
+/* SPDX-License-Identifier: MIT */
+/* Fictional sites for the browser e2e tests; brands and hosts are reserved .example names. */
+* { box-sizing: border-box; }
+body {
+  margin: 0; min-height: 100vh; display: flex; flex-direction: column; align-items: center;
+  font: 15px/1.45 "Inter", "Cantarell", system-ui, sans-serif; color: #1f2933;
+  background: radial-gradient(1200px 600px at 20% -10%, #dbe8ff, transparent), #f4f6fa;
+}
+body.fabrikam { background: radial-gradient(1200px 600px at 80% -10%, #ffe3d1, transparent), #faf6f3; }
+header { width: 100%; padding: 18px 32px; display: flex; align-items: center; gap: 10px; font-weight: 700; font-size: 18px; }
+.logo { width: 30px; height: 30px; border-radius: 8px; background: linear-gradient(135deg, #3b82f6, #1e40af); }
+.fabrikam .logo { background: linear-gradient(135deg, #fb923c, #c2410c); }
+main { margin-top: 56px; width: 380px; background: #fff; border-radius: 16px; padding: 30px 32px 26px;
+  box-shadow: 0 12px 40px rgba(15, 23, 42, 0.10), 0 1px 3px rgba(15, 23, 42, 0.08); }
+h1 { margin: 0 0 4px; font-size: 22px; }
+p.lead { margin: 0 0 22px; color: #64748b; }
+label { display: block; margin: 14px 0 6px; font-size: 13px; font-weight: 600; color: #334155; }
+input { width: 100%; padding: 10px 12px; font: inherit; border: 1px solid #cbd5e1; border-radius: 9px; background: #fff; }
+input:focus { outline: none; border-color: #3b82f6; box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.25); }
+button { margin-top: 22px; width: 100%; padding: 11px; font: inherit; font-weight: 600; color: #fff;
+  background: #2563eb; border: none; border-radius: 9px; cursor: pointer; }
+.fabrikam button { background: #ea580c; }
+.otp { display: flex; gap: 8px; justify-content: space-between; }
+.otp input { width: 46px; height: 54px; text-align: center; font-size: 22px; padding: 0; }
+.otp .dash { align-self: center; color: #94a3b8; }
+.foot { margin-top: 18px; font-size: 13px; color: #64748b; text-align: center; }
+iframe { width: 100%; height: 420px; border: 1px dashed #cbd5e1; border-radius: 12px; }
+@media (prefers-color-scheme: dark) {
+  :root { color-scheme: dark; }
+  body { color: #e5e7eb; background: radial-gradient(1200px 600px at 20% -10%, #1e2a4a, transparent), #0f1115; }
+  body.fabrikam { background: radial-gradient(1200px 600px at 80% -10%, #3a2316, transparent), #121010; }
+  main { background: #1c1f26; box-shadow: 0 12px 40px rgba(0, 0, 0, 0.45), 0 0 0 1px rgba(255, 255, 255, 0.06); }
+  p.lead, .foot { color: #9aa4b2; }
+  label { color: #cbd5e1; }
+  input { color: #e5e7eb; background: #11141a; border-color: #374151; }
+  iframe { border-color: #374151; }
+  a { color: #8ab4ff; }
+}

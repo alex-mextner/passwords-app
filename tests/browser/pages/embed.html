@@ -1,0 +1,19 @@
+<!doctype html>
+<!-- SPDX-FileCopyrightText: 2026 Alex Mextner -->
+<!-- SPDX-License-Identifier: MIT -->
+<html lang="en">
+<head><meta charset="utf-8"><title>Partner sign-in</title><link rel="stylesheet" href="/site.css"></head>
+<body>
+  <header><span class="logo"></span><span data-brand></span></header>
+  <main>
+    <h1>Partner portal</h1>
+    <p class="lead">Embedded sign-in from another site.</p>
+    <iframe id="frame" title="Embedded sign-in"></iframe>
+  </main>
+  <script src="/site.js"></script>
+  <script>
+    // The test passes the frame's URL in the query: ?src=https://other.example:port/login.html
+    document.getElementById("frame").src = new URLSearchParams(location.search).get("src") || "about:blank";
+  </script>
+</body>
+</html>
