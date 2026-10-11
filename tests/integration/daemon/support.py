@@ -23,6 +23,7 @@ from tests.unit.daemon.fake_clock import FakeClock, settle
 from tests.unit.daemon.fakes import APPLE_ID, FakeAccount, FakeNotifier
 
 from passwords_app.daemon import BUS_NAME, INTERFACE, OBJECT_PATH
+from passwords_app.daemon.bus import PatientMessageBus
 from passwords_app.daemon.controller import Daemon
 from passwords_app.daemon.main import publish
 from passwords_app.store.state import StateStore
@@ -116,7 +117,7 @@ async def running(
     )
     state = StateStore(tmp_path / "state.db", STATE_KEY)
     daemon = Daemon(account=account, local=local, state=state, clock=clock, notifier=notifier)
-    bus = await MessageBus(bus_address=private_bus).connect()
+    bus = await PatientMessageBus(bus_address=private_bus).connect()
     await publish(bus, daemon)
     await daemon.start()
     await settle()
