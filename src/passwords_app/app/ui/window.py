@@ -707,12 +707,20 @@ class MainWindow(Adw.ApplicationWindow):
             self.detail.show_item(None)
 
     def _refresh_if_stale(self, target: str, shown: Item | None) -> None:
-        """Reload the detail when the selected item changed elsewhere or iCloud's verdict did."""
+        """Reload the detail when the selected item changed elsewhere or iCloud's verdict did.
+
+        The daemon names every item whose content changed; the modified time alone misses
+        an edit made in the second of the previous one, since iCloud stamps whole seconds.
+        """
         obj = self.vault.find(target)
         stale = (
             shown is not None
             and obj is not None
-            and (obj.item.modified, obj.item.sync_problem) != (shown.modified, shown.sync_problem)
+            and (
+                target in self.vault.changed_ids
+                or (obj.item.modified, obj.item.sync_problem)
+                != (shown.modified, shown.sync_problem)
+            )
         )
         if stale and not self.detail.editing:
             self.detail.show_item(target)
