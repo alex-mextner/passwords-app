@@ -61,16 +61,32 @@ as protocol documentation; no code is copied from it.
 
 | field | type | iCloud source | Secret Service |
 |---|---|---|---|
-| `id` | `str` (uppercase UUID) | inet record UUID | attr `pa-id` |
+| `id` | `str` (uppercase UUID) | inet record UUID (the oldest record of the login, see below) | attr `pa-id` |
 | `url` | `str` | `ptcl`+`srvr`+`port`+`path` | attr `url`, also `server` |
 | `username` | `str` | `acct` | attr `username` |
 | `password` | `str` | `v_Data` | secret |
 | `title` | `str \| None` | sidecar `title` | label (see below) |
 | `notes` | `str \| None` | sidecar `notes` | attr `notes` |
 | `otpauth` | `str \| None` | sidecar `totp` → `otpauth://` URI | attr `otpauth` |
-| `alt_urls` | `tuple[str, ...]` | sidecar `s_as` | attr `alt-urls` (newline-joined) |
+| `alt_urls` | `tuple[str, ...]` | the login's other records' websites, then sidecar `s_as` | attr `alt-urls` (newline-joined) |
 | `group` | `str \| None` | shared group zone id | attr `group` |
 | `created`, `modified` | aware UTC `datetime` | `cdat`, `mdat` | attrs |
+
+**A login on several websites.** Apple keeps a login used on several websites of one domain
+as one inet record per website, all with the same account and password, and the Passwords
+app shows them as one entry. Live records (Recently Deleted is not grouped) sharing account
+and password are one `Credential` when they sit on one registrable domain or one lists the
+other's domain in its sidecar `s_as` (unless their titles, notes or one-time codes differ).
+Records are ordered oldest first (creation time, then record name); the first gives the id
+and `url`, the others' websites then every `s_as` entry become `alt_urls`, deduplicated in
+that order, so the content hash is stable; the etag covers every record. Saving rewrites
+every record in one conditional batch and never adds a record: the first record always
+stays and takes the new `url` (if that was another record's website, that record moves to
+Recently Deleted), any other record whose website was removed moves to Recently Deleted, and
+a new website goes into the first record's `s_as`. The remote snapshot names the record ids
+folded into a login (`RemoteSnapshot.merged`), so their keyring copies are retired without a
+mass-delete pause. A password counts as reused only across different domains, as Apple marks
+it.
 
 Keyring item: collection **"iCloud Passwords"**, schema `io.github.alex_mextner.Passwords`,
 label `"{title or host} — {username}"`. Users can create items in that collection from
