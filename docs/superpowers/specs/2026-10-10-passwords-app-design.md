@@ -122,7 +122,9 @@ purged. *Restore* re-inserts it locally; the next cycle pushes it to iCloud. iCl
 login per site and username, so when a live keyring login has the restored version's site and
 username (e.g. restoring a conflict loser), the restored version **replaces** that login in
 place and the displaced version goes to trash (reason `conflict`); Restore returns the live
-login's id.
+login's id. Otherwise a deleted item comes back under its own id while that id is free, so
+iCloud moves its record out of Recently Deleted instead of duplicating it; a conflict loser
+gets a fresh id.
 
 Scheduling: a cycle runs at start, every 60 s while the app or a browser is active and every
 5 min otherwise, 2 s after any local change (Secret Service `ItemCreated/Changed/Deleted`
@@ -139,11 +141,20 @@ parsing. Changes:
 - State moves to `~/.config/passwords-app/` (0700); session master key in Secret Service.
 - Persisted per-zone sync tokens; incremental fetch; record etags kept per item.
 - **Write path** (new): item encryption (inverse of decrypt: random item key wrapped by the
-  zone class key, AES-SIV, AAD v2), CloudKit record encoder, `record/save` (conditional on
-  etag) and `record/delete`, for the inet record and its Passwords sidecar.
+  zone class key, AES-SIV, AAD v2), CloudKit record encoder and `record/save`, for the inet
+  record and its Passwords sidecar. Each update is conditional on the tag read at fetch time,
+  sent as RecordSaveRequest field 4 (Apple ignores the tag inside the record; a stale tag
+  fails with client error 15 and the rest of the batch with 16); `record/delete` takes its
+  tag in RecordDeleteRequest field 2.
+- Deleting works like Apple's Passwords app: the login moves to access group
+  `com.apple.cfnetwork-recently-deleted` and its sidecar to
+  `com.apple.password-manager-recently-deleted` (one conditional save batch), so every Apple
+  device can still recover it; nothing is hard-deleted. Creating a login whose record sits
+  there moves it back.
 - Silent token refresh with the saved Apple ID password; when Apple demands 2FA the daemon
   status becomes `signin-required` and the app shows a re-auth dialog.
-- Apple's own *Recently Deleted* representation is detected and treated as a delete.
+- Apple's own *Recently Deleted* groups are read apart from live logins, so a login deleted
+  on the iPhone reaches the sync engine as a delete.
 
 Exposed to the sync layer only as `RemoteStore` (§10).
 

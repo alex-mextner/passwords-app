@@ -462,21 +462,22 @@ async def test_no_item_event_when_nothing_changed(daemon: Daemon, events: Events
 # ---------------------------------------------------------------- trash
 
 
-async def test_trash_restore_gives_a_new_id_and_uploads(
+async def test_trash_restore_keeps_the_free_id_and_uploads(
     remote: MemoryRemote, local: MemoryLocal, clock: FakeClock, daemon: Daemon
 ) -> None:
+    # Its own id lets iCloud move the record out of Recently Deleted instead of duplicating it.
     remote.put(make_credential("A"))
     await daemon.sync_now()
     remote.remove("A")
     await daemon.sync_now()
     (entry,) = daemon.trash()
     assert entry.reason == "deleted-in-icloud"
-    new_id = await daemon.restore(entry.trash_id)
-    assert new_id != "A"
-    assert new_id in local.items
+    restored_id = await daemon.restore(entry.trash_id)
+    assert restored_id == "A"
+    assert "A" in local.items
     assert daemon.trash() == []
     await clock.advance(DEBOUNCE)
-    assert new_id in remote.items
+    assert "A" in remote.items
 
 
 async def test_restore_unknown_is_not_found(daemon: Daemon) -> None:

@@ -427,18 +427,22 @@ class SyncEngine:
         live in the keyring (a conflict loser and its winner, or the login saved again since)
         cannot come back next to it: it replaces the twin in place, as the current version of
         that login, and the displaced version goes to trash so nothing is lost. Without a
-        twin the copy gets a fresh id: the original id may be tombstoned in iCloud, and
-        reusing it would collide with Apple's Recently Deleted record.
+        twin a deleted item comes back under its own id while that id is free on this side,
+        so the upload recovers the record iCloud keeps in Recently Deleted rather than adding
+        a duplicate next to it; a conflict loser, or an id that is live again, gets a fresh
+        id, since its original id belongs to another version that must not be overwritten.
         """
         entry = self._state.get_trash(trash_id)
         if entry is None:
             raise KeyError(trash_id)
         now = self._clock()
-        twin = self._live_twin(entry.credential, (await self._local.fetch()).items)
+        live = (await self._local.fetch()).items
+        twin = self._live_twin(entry.credential, live)
         if twin is None:
-            restored = dataclasses.replace(
-                entry.credential, id=str(uuid.uuid4()).upper(), modified=now
-            )
+            item_id = entry.credential.id
+            if entry.reason == "conflict" or item_id in live or item_id in self._state.bases():
+                item_id = str(uuid.uuid4()).upper()
+            restored = dataclasses.replace(entry.credential, id=item_id, modified=now)
             await self._local.upsert(restored)
         elif content_key(twin) == content_key(entry.credential):
             restored = twin

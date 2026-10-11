@@ -26,7 +26,18 @@ from passwords_app.icloud.keychain.client import (
     RecordConflictError,
     UnreadableZoneError,
 )
-from passwords_app.icloud.transport.cloudkit import CLIENT_ATOMIC_FAILURE, CloudKitError
+from passwords_app.icloud.proto.codec import Writer
+from passwords_app.icloud.transport import ckks
+from passwords_app.icloud.transport.cloudkit import (
+    CKDATABASE_SAVE_PATH,
+    CLIENT_ATOMIC_FAILURE,
+    CLIENT_OP_LOCK_FAILURE,
+    SECURITYD_BUNDLE,
+    CloudKitError,
+    CloudKitResult,
+    CloudKitTransport,
+    Operation,
+)
 
 if TYPE_CHECKING:
     from collections.abc import Callable
@@ -388,6 +399,68 @@ def test_edit_racing_another_device_is_a_conflict_and_loses_nothing(
     assert fake.logins()[_cred().id].password == "from-iphone"
 
 
+def _raw_update(keychain: KeychainClient, rec: ckks.CloudKitRecord) -> CloudKitResult:
+    """Send an update with no request-level condition, only the tag inside the record."""
+    transport = keychain._transport
+    assert isinstance(transport, CloudKitTransport)
+    request = Writer().message(1, ckks.encode_record(rec)).uint64(6, ckks.SAVE_UPDATE).finish()
+    [result] = transport.perform_batch(
+        CKDATABASE_SAVE_PATH,
+        [Operation(ckks.OP_TYPE_RECORD_SAVE, ckks.FIELD_RECORD_SAVE, request)],
+        bundle=SECURITYD_BUNDLE,
+    )
+    return result
+
+
+def test_fake_ignores_the_tag_inside_the_record_like_apple(
+    fake: FakeCloudKit, keychain: KeychainClient
+) -> None:
+    # The live probe (#72) showed Apple accepts a stale tag inside the record; only the
+    # request's own tag (RecordSaveRequest field 4) makes an update conditional.
+    fake.put_login(_cred())
+    rec = fake.record(_cred().id)
+    assert rec is not None
+    assert _raw_update(keychain, dataclasses.replace(rec, etag="stale")).ok
+
+
+def test_stale_record_fails_with_oplock_and_its_partner_with_atomic_failure(
+    fake: FakeCloudKit, keychain: KeychainClient
+) -> None:
+    fake.put_login(_cred(title="T"), sidecar_name="SIDE")
+    item, side = fake.record(_cred().id), fake.record("SIDE")
+    assert item is not None
+    assert side is not None
+    fake.put_item(_cred().id, {**fake.item(_cred().id), "v_Data": b"from-iphone"})
+    results = keychain._transport.save_records([(item, False), (side, False)])
+    assert [(r.ok, r.client_error) for r in results] == [
+        (False, CLIENT_OP_LOCK_FAILURE),
+        (False, CLIENT_ATOMIC_FAILURE),
+    ]
+    assert [r.conflict for r in results] == [True, False]
+
+
+def test_create_of_an_existing_record_fails_with_oplock(
+    fake: FakeCloudKit, keychain: KeychainClient
+) -> None:
+    fake.put_login(_cred())
+    rec = fake.record(_cred().id)
+    assert rec is not None
+    [result] = keychain._transport.save_records([(rec, True)])
+    assert (result.client_error, result.conflict) == (CLIENT_OP_LOCK_FAILURE, True)
+
+
+def test_sidecar_edit_racing_a_remote_sidecar_edit_is_a_conflict(
+    fake: FakeCloudKit, keychain: KeychainClient
+) -> None:
+    fake.put_login(_cred(title="T"), sidecar_name="SIDE")
+    stored = keychain.fetch()[_cred().id]
+    fake.put_item("SIDE", {**fake.item("SIDE"), "labl": "changed on iphone"})
+    with pytest.raises(RecordConflictError):
+        keychain.save(dataclasses.replace(stored.credential, password="new"), stored.etag)
+    assert fake.logins()[_cred().id].password == _cred().password
+    assert fake.item("SIDE")["labl"] == "changed on iphone"
+
+
 def test_edit_keeps_unknown_attributes_and_record_fields(
     fake: FakeCloudKit, keychain: KeychainClient
 ) -> None:
@@ -472,17 +545,98 @@ def test_two_quick_edits_both_land_in_order(fake: FakeCloudKit, keychain: Keycha
 # --- delete ------------------------------------------------------------------------------------
 
 
-def test_delete_removes_item_and_sidecar_together(
+def _requests(fake: FakeCloudKit, suffix: str) -> list[list[int]]:
+    return [ops for path, ops in fake.requests if path.endswith(suffix)]
+
+
+def test_delete_moves_login_and_sidecar_to_recently_deleted(
     fake: FakeCloudKit, keychain: KeychainClient
 ) -> None:
+    # Like the Passwords app: every Apple device can still recover the login for 30 days.
     fake.put_login(_cred(title="T"), sidecar_name="SIDE")
     fake.put_login(_cred(2))
     stored = keychain.fetch()[_cred().id]
+    before = fake.items()
     keychain.delete(_cred().id, stored.etag)
-    deletes = [ops for path, ops in fake.requests if path.endswith("/record/delete")]
-    assert deletes == [[214, 214]]
-    assert fake.record("SIDE") is None
+    assert _requests(fake, "/record/delete") == []
+    assert _saves(fake) == [[210, 210]]
+    after = fake.items()
+    assert set(after) == set(before)  # nothing removed, nothing added
+    assert after[_cred().id]["agrp"] == passwords.AGRP_LOGIN_DELETED
+    assert after["SIDE"]["agrp"] == passwords.AGRP_SIDECAR_DELETED
+    for name in (_cred().id, "SIDE"):
+        assert after[name].keys() == before[name].keys()
+        unchanged = {k: v for k, v in after[name].items() if k not in {"agrp", "mdat", "sha1"}}
+        assert unchanged == {k: before[name][k] for k in unchanged}
+    assert set(fake.logins()) == {_cred(2).id}
+    assert _same(fake.logins(deleted=True)[_cred().id], _cred(title="T"))
     assert set(keychain.fetch()) == {_cred(2).id}
+
+
+def test_login_deleted_on_the_iphone_reads_as_deleted(
+    fake: FakeCloudKit, keychain: KeychainClient
+) -> None:
+    fake.put_login(_cred(title="T"), sidecar_name="SIDE")
+    keychain.fetch()
+    fake.trash_login(_cred().id, "SIDE")
+    assert keychain.fetch() == {}
+
+
+@pytest.mark.parametrize("deleted_on", ["linux", "iphone"])
+def test_creating_a_recently_deleted_login_moves_it_back(
+    fake: FakeCloudKit, keychain: KeychainClient, deleted_on: str
+) -> None:
+    fake.put_login(_cred(title="T"), sidecar_name="SIDE")
+    stored = keychain.fetch()[_cred().id]
+    if deleted_on == "linux":
+        keychain.delete(_cred().id, stored.etag)
+    else:
+        fake.trash_login(_cred().id, "SIDE")
+        keychain.fetch()
+    names = set(fake.items())
+    restored = _cred(title="T", notes="back")
+    etag = keychain.save(restored, None)
+    assert set(fake.items()) == names  # the same records, no duplicate
+    assert fake.item(_cred().id)["agrp"] == passwords.AGRP_LOGIN
+    assert fake.item("SIDE")["agrp"] == passwords.AGRP_SIDECAR
+    assert fake.logins(deleted=True) == {}
+    assert _same(fake.logins()[_cred().id], restored)
+    assert keychain.fetch()[_cred().id].etag == etag
+
+
+def test_restoring_a_login_without_metadata_into_one_with_it_adds_a_sidecar(
+    fake: FakeCloudKit, keychain: KeychainClient
+) -> None:
+    fake.put_login(_cred())
+    keychain.delete(_cred().id, keychain.fetch()[_cred().id].etag)
+    keychain.save(_cred(title="T"), None)
+    assert _saves(fake)[-1] == [210, 210]
+    assert fake.logins()[_cred().id].title == "T"
+    assert fake.logins(deleted=True) == {}
+
+
+def test_restore_racing_a_recovery_on_the_iphone_is_a_conflict(
+    fake: FakeCloudKit, keychain: KeychainClient
+) -> None:
+    fake.put_login(_cred(title="T"), sidecar_name="SIDE")
+    fake.trash_login(_cred().id, "SIDE")
+    keychain.fetch()
+    fake.recover_login(_cred().id, "SIDE")
+    with pytest.raises(RecordConflictError):
+        keychain.save(_cred(password="from-linux"), None)
+    assert fake.logins()[_cred().id].password == _cred().password
+
+
+def test_new_login_for_a_recently_deleted_site_and_account_is_a_new_record(
+    fake: FakeCloudKit, keychain: KeychainClient
+) -> None:
+    fake.put_login(_cred(1, password="old"))
+    fake.trash_login(_cred(1).id)
+    keychain.fetch()
+    fresh = dataclasses.replace(_cred(1), id=_cred(2).id)
+    keychain.save(fresh, None)
+    assert set(fake.logins()) == {fresh.id}
+    assert fake.logins(deleted=True)[_cred(1).id].password == "old"
 
 
 def test_delete_with_stale_etag_is_a_conflict(fake: FakeCloudKit, keychain: KeychainClient) -> None:
@@ -493,17 +647,65 @@ def test_delete_with_stale_etag_is_a_conflict(fake: FakeCloudKit, keychain: Keyc
     assert _cred().id in fake.logins()
 
 
+def _on_first(fake: FakeCloudKit, suffix: str, action: Callable[[], object]) -> None:
+    """Run `action` once, as another device would, when the first `suffix` request arrives."""
+    fired = False
+
+    def hook(path: str) -> None:
+        nonlocal fired
+        if not fired and path.endswith(suffix):
+            fired = True
+            action()
+
+    fake.on_request = hook
+
+
 def test_delete_racing_an_edit_on_another_device_is_a_conflict(
     fake: FakeCloudKit, keychain: KeychainClient
 ) -> None:
-    # The cached tag still matches, so only a fresh read before deleting catches the edit;
-    # deleting anyway would destroy a password the user just changed on their iPhone.
+    # The edit lands between the fresh read and the delete, so only the server's check of
+    # the tag the delete carries catches it; deleting anyway would destroy a new password.
     fake.put_login(_cred())
     stored = keychain.fetch()[_cred().id]
-    fake.put_item(_cred().id, {**fake.item(_cred().id), "v_Data": b"from-iphone"})
+    _on_first(
+        fake,
+        "/record/save",
+        lambda: fake.put_item(_cred().id, {**fake.item(_cred().id), "v_Data": b"from-iphone"}),
+    )
     with pytest.raises(RecordConflictError):
         keychain.delete(_cred().id, stored.etag)
     assert fake.logins()[_cred().id].password == "from-iphone"
+
+
+def test_delete_racing_a_sidecar_edit_deletes_nothing(
+    fake: FakeCloudKit, keychain: KeychainClient
+) -> None:
+    fake.put_login(_cred(title="T"), sidecar_name="SIDE")
+    stored = keychain.fetch()[_cred().id]
+    _on_first(
+        fake,
+        "/record/save",
+        lambda: fake.put_item("SIDE", {**fake.item("SIDE"), "labl": "changed on iphone"}),
+    )
+    with pytest.raises(RecordConflictError):
+        keychain.delete(_cred().id, stored.etag)
+    assert fake.logins()[_cred().id].title == "T"
+    assert fake.item("SIDE")["labl"] == "changed on iphone"
+
+
+def test_delete_after_another_device_added_a_sidecar_is_a_conflict(
+    fake: FakeCloudKit, keychain: KeychainClient
+) -> None:
+    # The login record keeps its tag, so no condition in the batch would notice the new
+    # sidecar; deleting would leave its notes behind with no login.
+    fake.put_login(_cred())
+    stored = keychain.fetch()[_cred().id]
+    sidecar = passwords.updated_login(stored.login, _cred(notes="n"), T0).sidecar
+    assert sidecar is not None
+    fake.put_item("SIDE", sidecar)
+    with pytest.raises(RecordConflictError):
+        keychain.delete(_cred().id, stored.etag)
+    assert fake.logins()[_cred().id].notes == "n"
 
 
 def test_unconditional_delete(fake: FakeCloudKit, keychain: KeychainClient) -> None:
@@ -513,10 +715,19 @@ def test_unconditional_delete(fake: FakeCloudKit, keychain: KeychainClient) -> N
     assert fake.logins() == {}
 
 
+def test_unconditional_delete_reaches_a_login_created_since_the_last_fetch(
+    fake: FakeCloudKit, keychain: KeychainClient
+) -> None:
+    keychain.fetch()
+    fake.put_login(_cred())
+    keychain.delete(_cred().id, None)
+    assert fake.logins() == {}
+
+
 def test_deleting_an_absent_login_is_a_no_op(fake: FakeCloudKit, keychain: KeychainClient) -> None:
     keychain.fetch()
     keychain.delete("nothing-here", "x")
-    assert not [p for p, _ in fake.requests if p.endswith("/record/delete")]
+    assert _saves(fake) == []
 
 
 def test_failed_delete_raises_and_keeps_the_login(
@@ -524,7 +735,7 @@ def test_failed_delete_raises_and_keeps_the_login(
 ) -> None:
     fake.put_login(_cred())
     stored = keychain.fetch()[_cred().id]
-    fake.fail("/record/delete", client_error=8)
+    fake.fail("/record/save", client_error=8)
     with pytest.raises(CloudKitError):
         keychain.delete(_cred().id, stored.etag)
     assert _cred().id in keychain.fetch()

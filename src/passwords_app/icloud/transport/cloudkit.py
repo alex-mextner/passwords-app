@@ -547,19 +547,23 @@ class CloudKitTransport:
 
     def delete_records(
         self,
-        names: Sequence[tuple[str, ckks.ZoneId]],
+        deletes: Sequence[tuple[str, ckks.ZoneId, str | None]],
         *,
         bundle: str = SECURITYD_BUNDLE,
         database: int = DB_PRIVATE,
     ) -> list[CloudKitResult]:
-        """Delete records by name in one zone-atomic batch; results in request order."""
+        """Delete (name, zone, tag) records in one zone-atomic batch; results in request order.
+
+        Each delete is conditional on its tag (None: unconditional); a stale one fails the
+        batch with client error 15 (oplock), its partners with 16 (atomic failure).
+        """
         ops = [
             Operation(
                 ckks.OP_TYPE_RECORD_DELETE,
                 ckks.FIELD_RECORD_DELETE,
-                ckks.build_delete_request(name, zone),
+                ckks.build_delete_request(name, zone, etag),
             )
-            for name, zone in names
+            for name, zone, etag in deletes
         ]
         return self.perform_batch(CKDATABASE_DELETE_PATH, ops, bundle=bundle, database=database)
 

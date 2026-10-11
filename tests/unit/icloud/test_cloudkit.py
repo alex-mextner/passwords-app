@@ -416,16 +416,16 @@ def test_save_records_sends_one_conditional_op_per_record() -> None:
     [sent] = http.sent
     assert sent["url"].endswith(ck.CKDATABASE_SAVE_PATH)
     saved = [ckks.parse_save_request(op.payload(210) or b"") for op in _ops_of(sent["data"])]
-    assert saved == recs
+    assert saved == [(recs[0][0], False, "e1"), (recs[1][0], True, None)]
 
 
-def test_delete_records_names_each_record_and_zone() -> None:
+def test_delete_records_sends_each_record_conditional_on_its_tag() -> None:
     http = _Http(_echo_ok)
-    _transport(http).delete_records([("A", ZONE), ("B", ZONE)])
+    _transport(http).delete_records([("A", ZONE, "e1"), ("B", ZONE, None)])
     [sent] = http.sent
     assert sent["url"].endswith(ck.CKDATABASE_DELETE_PATH)
     names = [ckks.parse_delete_request(op.payload(214) or b"") for op in _ops_of(sent["data"])]
-    assert names == [("A", ZONE), ("B", ZONE)]
+    assert names == [("A", ZONE, "e1"), ("B", ZONE, None)]
 
 
 def test_failed_single_operation_raises_with_client_error() -> None:

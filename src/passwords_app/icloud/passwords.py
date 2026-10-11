@@ -10,6 +10,9 @@ are joined on (server, account), case-insensitively; the sidecar's label is
 
 Rewrites start from the decrypted originals and replace only the fields that changed, so
 attributes this client does not know about (and Apple adds over time) survive an edit.
+
+Deleting a login, as the Passwords app does it, moves both records into Recently Deleted
+access groups (`moved_login`); those logins pair only with each other, never with live ones.
 """
 
 from __future__ import annotations
@@ -31,6 +34,10 @@ if TYPE_CHECKING:
 
 AGRP_LOGIN = "com.apple.cfnetwork"
 AGRP_SIDECAR = "com.apple.password-manager"
+# Apple's Passwords app deletes by moving a login and its sidecar into these groups (its
+# Recently Deleted list, purged after 30 days); the records keep their names and attributes.
+AGRP_LOGIN_DELETED = "com.apple.cfnetwork-recently-deleted"
+AGRP_SIDECAR_DELETED = "com.apple.password-manager-recently-deleted"
 SIDECAR_LABEL = "Password Manager Metadata: "
 SIDECAR_DESCRIPTION = "Password Manager Metadata"
 SIDECAR_TYPE = int.from_bytes(b"mine", "big")  # FourCC 'mine'
@@ -128,35 +135,40 @@ def _key_of(attrs: Mapping[str, object]) -> Attributes:
 _PRIMARY_KEY_ATTRS = ("srvr", "acct", "ptcl", "port", "path", "sdmn", "atyp")
 
 
-def is_login(attrs: Mapping[str, object]) -> bool:
-    return attrs.get("agrp") == AGRP_LOGIN and attrs.get("class", "inet") == "inet"
+def is_login(attrs: Mapping[str, object], *, deleted: bool = False) -> bool:
+    """Tell whether `attrs` is a website login (`deleted`: one in Recently Deleted instead)."""
+    agrp = AGRP_LOGIN_DELETED if deleted else AGRP_LOGIN
+    return attrs.get("agrp") == agrp and attrs.get("class", "inet") == "inet"
 
 
-def is_sidecar(attrs: Mapping[str, object]) -> bool:
-    return attrs.get("agrp") == AGRP_SIDECAR
+def is_sidecar(attrs: Mapping[str, object], *, deleted: bool = False) -> bool:
+    return attrs.get("agrp") == (AGRP_SIDECAR_DELETED if deleted else AGRP_SIDECAR)
 
 
-def pair_logins(items: Iterable[StoredItem]) -> list[Login]:
+def pair_logins(items: Iterable[StoredItem], *, deleted: bool = False) -> list[Login]:
     """Join each login with its sidecar; items that are neither are left out.
 
     A sidecar matches on the login's full key first, then on (server, account, protocol, port)
     alone, so a path or domain Apple rewrote still joins while a sidecar left behind by a login
     on another port never does. A key shared by several unjoined logins or sidecars joins
     nothing, since any choice could show one login's notes on another; each sidecar joins at
-    most one login.
+    most one login. `deleted` pairs the logins in Apple's Recently Deleted instead of the live
+    ones; the two never mix.
     """
-    logins, sidecars = _logins_and_sidecars(items)
+    logins, sidecars = _logins_and_sidecars(items, deleted=deleted)
     joined = _join_sidecars(logins, sidecars)
     return [Login(it, joined.get(it.record_name)) for it in logins]
 
 
-def _logins_and_sidecars(items: Iterable[StoredItem]) -> tuple[list[StoredItem], list[StoredItem]]:
+def _logins_and_sidecars(
+    items: Iterable[StoredItem], *, deleted: bool
+) -> tuple[list[StoredItem], list[StoredItem]]:
     logins: list[StoredItem] = []
     sidecars: list[StoredItem] = []
     for it in items:
-        if is_login(it.attrs):
+        if is_login(it.attrs, deleted=deleted):
             logins.append(it)
-        elif is_sidecar(it.attrs):
+        elif is_sidecar(it.attrs, deleted=deleted):
             sidecars.append(it)
     return logins, sidecars
 
@@ -606,3 +618,20 @@ def _updated_sidecar(
         sidecar["mdat"] = now
         _sealed(sidecar)
     return sidecar
+
+
+def moved_login(login: Login, now: datetime, *, deleted: bool) -> Login:
+    """Move the login and its sidecar into Apple's Recently Deleted (`deleted`) or back out.
+
+    This is how the Passwords app deletes and recovers a login: the records keep their names
+    and attributes, only the access group changes (and the modification time, dating the move).
+    """
+    login_group, sidecar_group = (
+        (AGRP_LOGIN_DELETED, AGRP_SIDECAR_DELETED) if deleted else (AGRP_LOGIN, AGRP_SIDECAR)
+    )
+
+    def move(it: StoredItem, agrp: str) -> StoredItem:
+        return StoredItem(it.record_name, _sealed({**it.attrs, "agrp": agrp, "mdat": now}))
+
+    side = move(login.sidecar, sidecar_group) if login.sidecar is not None else None
+    return Login(move(login.item, login_group), side)

@@ -407,13 +407,21 @@ def test_save_request_round_trips(create: bool, semantics: int) -> None:
     rec = ckks.CloudKitRecord("A", "item", {"gen": 0}, etag=None if create else "e1", zone=ZONE)
     raw = ckks.build_save_request(rec, create=create)
     assert pb.first_int(pb.decode_fields(raw), 6) == semantics
-    assert ckks.parse_save_request(raw) == (rec, create)
+    assert ckks.parse_save_request(raw) == (rec, create, None if create else "e1")
 
 
-def test_update_carries_the_change_tag_it_is_conditional_on() -> None:
+def test_update_is_conditional_on_the_tag_in_the_request_not_the_record() -> None:
+    # Apple ignores the tag inside the record; only RecordSaveRequest field 4 is checked.
     rec = ckks.CloudKitRecord("A", "item", {}, etag="seen-tag", zone=ZONE)
-    saved, _ = ckks.parse_save_request(ckks.build_save_request(rec, create=False))
-    assert saved.etag == "seen-tag"
+    raw = ckks.build_save_request(rec, create=False)
+    assert pb.first_str(pb.decode_fields(raw), 4) == "seen-tag"
+    assert ckks.parse_save_request(raw)[2] == "seen-tag"
+
+
+def test_create_carries_no_condition() -> None:
+    rec = ckks.CloudKitRecord("A", "item", {}, etag="ignored", zone=ZONE)
+    raw = ckks.build_save_request(rec, create=True)
+    assert pb.first_str(pb.decode_fields(raw), 4) is None
 
 
 def test_save_request_without_record_is_rejected() -> None:
@@ -421,9 +429,11 @@ def test_save_request_without_record_is_rejected() -> None:
         ckks.parse_save_request(b"")
 
 
-def test_delete_request_round_trips() -> None:
-    raw = ckks.build_delete_request("A", ZONE)
-    assert ckks.parse_delete_request(raw) == ("A", ZONE)
+@pytest.mark.parametrize("etag", ["e1", None])
+def test_delete_request_round_trips(etag: str | None) -> None:
+    raw = ckks.build_delete_request("A", ZONE, etag)
+    assert pb.first_str(pb.decode_fields(raw), 2) == etag
+    assert ckks.parse_delete_request(raw) == ("A", ZONE, etag)
 
 
 def test_delete_request_without_id_is_rejected() -> None:
