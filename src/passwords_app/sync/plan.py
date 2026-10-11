@@ -362,10 +362,16 @@ class _Planner:
         fail forever (#71): the newer version takes the iCloud login's id and the other goes
         to trash. Every id resolved here is added to `settled` and skipped for this cycle.
         """
-        new = [i for i in sorted(self.local) if i not in self.remote and i not in settled]
-        twins = _login_twins(self.remote) if any(i not in self.base for i in new) else {}
-        for lid in new:
-            twin = self._twin(lid, twins)
+        new = {
+            lid: identity
+            for lid in sorted(self.local)
+            if lid not in self.base and lid not in self.remote and lid not in settled
+            if (identity := login_identity(self.local[lid])) is not None
+        }
+        # Indexing every iCloud login costs a URL parse each: only when a candidate exists.
+        twins = _login_twins(self.remote) if new else {}
+        for lid, identity in new.items():
+            twin = self._twin(lid, identity, twins)
             if twin is None:
                 continue
             settled.add(lid)
@@ -373,14 +379,12 @@ class _Planner:
                 # Otherwise another duplicate replaced the twin this cycle; this one waits.
                 self.merge(lid, twin, settled)
 
-    def _twin(self, lid: str, twins: Mapping[LoginIdentity, list[str]]) -> str | None:
+    def _twin(
+        self, lid: str, identity: LoginIdentity, twins: Mapping[LoginIdentity, list[str]]
+    ) -> str | None:
         """Return the iCloud login the new keyring item `lid` duplicates, if it should merge."""
-        if lid in self.base:
-            return None
-        dup = self.local[lid]
-        identity = login_identity(dup)
-        ids = twins.get(identity) if identity is not None else None
-        twin = _only_twin(dup, ids, self.remote) if ids else None
+        ids = twins.get(identity)
+        twin = _only_twin(self.local[lid], ids, self.remote) if ids else None
         if twin is None:
             return None
         held = self.local.get(twin)
