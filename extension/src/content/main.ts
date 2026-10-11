@@ -262,8 +262,7 @@ class ContentScript {
     if (command.type === "apply-code") {
       this.rescan();
       // The focused form's code boxes first, else the page's only/first code field.
-      const group =
-        this.focusedForm()?.otp ?? this.forms.find((f) => f.otp !== null)?.otp ?? null;
+      const group = this.focusedForm()?.otp ?? this.forms.find((f) => f.otp !== null)?.otp ?? null;
       if (group === null) return false;
       fillOtp(group, command.code);
       return true;

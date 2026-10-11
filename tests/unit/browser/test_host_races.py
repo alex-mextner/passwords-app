@@ -22,7 +22,7 @@ from passwords_app.browser.protocol import Candidate, Login
 
 OLD = "https://old.example.com/login"
 ITEM = "item-1"
-BANK_SECRET = "Bank-Fictional-7"  # noqa: S105 - test data
+BANK_SECRET = "Bank-Fictional-7"
 
 
 def _candidate() -> Candidate:

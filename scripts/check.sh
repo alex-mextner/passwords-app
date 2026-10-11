@@ -373,7 +373,9 @@ gate_bun-audit() {
     skip bun-audit "no extension/"
     return
   fi
-  run_gate bun-audit bun -- in_extension bun audit
+  # node-forge via web-ext>adbkit: no fixed release; adbkit only parses ADB public keys, never
+  # verifies signatures, and only for `web-ext run --target firefox-android` (unreachable here).
+  run_gate bun-audit bun -- in_extension bun audit --ignore GHSA-86w9-cpqp-85rv
 }
 gate_semgrep-ts() {
   if [[ ! -f extension/package.json ]]; then

@@ -139,25 +139,9 @@ class Host:
             raise not_allowed()
 
     async def _save(self, request: Save) -> Mapping[str, object]:
-        candidates = await self._daemon.match(request.url)
-        if request.item_id is not None:
-            if not any(c.id == request.item_id for c in candidates):
-                raise not_allowed()
-            targets = [request.item_id]
-        else:
-            # Best match first; several items for one username happen after merges.
-            targets = [c.id for c in candidates if c.username == request.username]
+        targets = await self._save_targets(request)
         if not targets:
-            if request.dry_run:
-                return save_result("create", None, saved=False)
-            fields = {
-                "url": origin(request.url),
-                "username": request.username,
-                "password": request.password,
-            }
-            if request.title:
-                fields["title"] = request.title
-            return save_result("create", await self._daemon.save(fields), saved=True)
+            return await self._create(request)
         for target in targets:
             login = await self._daemon.login(target)
             if login.username == request.username and login.password == request.password:
@@ -169,6 +153,27 @@ class Host:
         await self._require_candidate(target, request.url)
         fields = {"id": target, "username": request.username, "password": request.password}
         return save_result("update", await self._daemon.save(fields), saved=True)
+
+    async def _save_targets(self, request: Save) -> list[str]:
+        candidates = await self._daemon.match(request.url)
+        if request.item_id is not None:
+            if not any(c.id == request.item_id for c in candidates):
+                raise not_allowed()
+            return [request.item_id]
+        # Best match first; several items for one username happen after merges.
+        return [c.id for c in candidates if c.username == request.username]
+
+    async def _create(self, request: Save) -> Mapping[str, object]:
+        if request.dry_run:
+            return save_result("create", None, saved=False)
+        fields = {
+            "url": origin(request.url),
+            "username": request.username,
+            "password": request.password,
+        }
+        if request.title:
+            fields["title"] = request.title
+        return save_result("create", await self._daemon.save(fields), saved=True)
 
 
 def encode_response(response: Mapping[str, object]) -> bytes:

@@ -1,3 +1,6 @@
+# SPDX-FileCopyrightText: 2026 Alex Mextner
+# SPDX-License-Identifier: MIT
+#
 # Fake credentials used by test fixtures; none are real secrets.
 [extend]
 useDefault = true

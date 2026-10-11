@@ -210,6 +210,14 @@ def build_extension() -> tuple[Path, Path]:
     newest = max(p.stat().st_mtime for p in sources)
     if not all(o.exists() and o.stat().st_mtime >= newest for o in outputs):
         bun = shutil.which("bun") or str(Path.home() / ".bun" / "bin" / "bun")
+        if not (EXTENSION / "node_modules").is_dir():
+            # A fresh checkout (CI) has no dependencies yet; the bundle inlines tldts.
+            subprocess.run(  # noqa: S603
+                [bun, "install", "--frozen-lockfile"],
+                cwd=EXTENSION,
+                check=True,
+                capture_output=True,
+            )
         subprocess.run([bun, "scripts/build.ts"], cwd=EXTENSION, check=True, capture_output=True)  # noqa: S603
     return dist / "firefox", dist / "chrome"
 
