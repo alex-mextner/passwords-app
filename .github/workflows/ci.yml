@@ -175,8 +175,11 @@ jobs:
       - name: Setup
         uses: ./.github/actions/setup # zizmor: ignore[self-repository]
         with:
-          # The integration tests start their own private dbus-daemon and gnome-keyring-daemon.
-          apt-packages: dbus-daemon gnome-keyring ${{ env.GI_PACKAGES }}
+          # The integration tests start their own private dbus-daemon and gnome-keyring-daemon;
+          # the app data-file tests need the real validators and msgfmt.
+          apt-packages: >-
+            dbus-daemon gnome-keyring appstream desktop-file-utils gettext libxml2-utils
+            ${{ env.GI_PACKAGES }}
       - name: Check
         # One job: coverage reuses this run's unit + integration data instead of re-running them.
         run: scripts/check.sh unit integration coverage

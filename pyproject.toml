@@ -186,5 +186,3 @@ extend_exclude = ["conftest\\.py"]
 
 [tool.deptry.per_rule_ignores]
 DEP001 = ["gi"]
-# TEMPORARY: declared ahead of its first importer, feat/keyring (#6), which deletes this entry.
-DEP002 = ["dbus-fast"]
