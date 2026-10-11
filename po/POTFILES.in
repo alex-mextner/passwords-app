@@ -1,0 +1,17 @@
+src/passwords_app/app/formatting.py
+src/passwords_app/app/sections.py
+src/passwords_app/app/security.py
+src/passwords_app/app/ui/application.py
+src/passwords_app/app/ui/detail.py
+src/passwords_app/app/ui/editor.py
+src/passwords_app/app/ui/item_list.py
+src/passwords_app/app/ui/new_password.py
+src/passwords_app/app/ui/preferences.py
+src/passwords_app/app/ui/shortcuts.py
+src/passwords_app/app/ui/sidebar.py
+src/passwords_app/app/ui/signin.py
+src/passwords_app/app/ui/sync_status.py
+src/passwords_app/app/ui/widgets.py
+src/passwords_app/app/ui/window.py
+src/passwords_app/app/validation.py
+src/passwords_app/app/vault.py
