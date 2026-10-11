@@ -444,15 +444,10 @@ class SyncEngine:
             restored = twin
         else:
             restored = dataclasses.replace(entry.credential, id=twin.id, modified=now)
-            displaced = _trash_entry(twin, "conflict", now)
-            added = self._state.add_trash(displaced)  # committed before the overwrite
-            try:
-                await self._local.upsert(restored)
-            except LocalUnavailable:
-                # Nothing was written, so the twin is still live: no copy of it is needed.
-                if added:
-                    self._state.remove_trash(displaced.trash_id)
-                raise
+            # Committed before the overwrite and kept even if the write fails: a failed
+            # write may still have landed (a lost reply), and then this is the only copy.
+            self._state.add_trash(_trash_entry(twin, "conflict", now))
+            await self._local.upsert(restored)
             with self._state.transaction():
                 self._mark_restored_as_edit(twin, restored)
                 self._state.remove_trash(trash_id)
@@ -481,10 +476,20 @@ class SyncEngine:
         if len(twins) <= 1:
             return twins[0] if twins else None
         # Several keyring logins share the identity (Seahorse duplicates, or iCloud logins
-        # that differ only in what a Credential does not carry): prefer the version's own
-        # login, then the one iCloud already has.
+        # that differ only in what a Credential does not carry). Prefer the one whose written
+        # port matches too (`:443` next to a portless login are two keychain logins), then the
+        # version's own login, then the one iCloud already has.
+        exact = login_identity(version, exact_port=True)
         synced = self._state.bases().keys()
-        return min(twins, key=lambda c: (c.id != version.id, c.id not in synced, c.id))
+        return min(
+            twins,
+            key=lambda c: (
+                login_identity(c, exact_port=True) != exact,
+                c.id != version.id,
+                c.id not in synced,
+                c.id,
+            ),
+        )
 
     def purge(self, trash_id: str) -> None:
         """Delete a trash entry for good."""

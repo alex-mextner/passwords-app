@@ -664,21 +664,43 @@ _IDENTITY_URLS = (
     "https://example.com:443",
     "https://example.com:8443",
     "http://example.com",
+    "http://example.com:80",
     "ftp://example.com",
     "https://www.example.com",
     "https://[fe80::1]:444",
 )
 
 
-def test_login_identity_is_the_keychain_duplicate_rule() -> None:
-    """`login_identity` (used to restore over a live twin) agrees with what Apple rejects."""
-    logins = [
+def _read_back(c: Credential) -> Credential:
+    """`c` as the next fetch returns it after saving it to iCloud."""
+    stored = pw.to_credential(pw.Login(pw.StoredItem("R", pw.new_login(c, NOW).item), None))
+    assert stored is not None
+    return dataclasses.replace(stored, id=c.id)
+
+
+def _without_default_port(url: str) -> str:
+    return url.lower().removesuffix(":443").removesuffix(":80")
+
+
+def test_login_identity_finds_every_login_the_keychain_would_refuse_as_a_duplicate() -> None:
+    """`login_identity` (used to restore over a live twin) never misses an Apple duplicate,
+    for logins as written and as read back, and only merges what differs by a default port."""
+    written = [
         Credential(f"id{i}-{user}", url, user, "p", T0, T0)
         for i, url in enumerate(_IDENTITY_URLS)
         for user in ("alice", "ALICE", "bob", "")
     ]
-    for a in logins:
+    logins = written + [_read_back(c) for c in written]
+    for a in written:
         key_a = pw.primary_key(pw.new_login(a, NOW).item)
         for b in logins:
-            same_in_keychain = key_a == pw.primary_key(pw.new_login(b, NOW).item)
-            assert (login_identity(a) == login_identity(b)) == same_in_keychain, (a.url, b.url)
+            if key_a == pw.primary_key(pw.new_login(b, NOW).item):
+                assert login_identity(a) == login_identity(b), (a.url, b.url)
+            elif login_identity(a) == login_identity(b):
+                assert _without_default_port(a.url) == _without_default_port(b.url)
+
+
+def test_a_read_back_login_keeps_its_identity() -> None:
+    for url in _IDENTITY_URLS:
+        c = Credential("C", url, "alice", "p", T0, T0)
+        assert login_identity(_read_back(c)) == login_identity(c), url

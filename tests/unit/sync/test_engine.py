@@ -438,7 +438,7 @@ async def test_restore_prefers_the_synced_twin(w: World) -> None:
     assert await w.engine.restore(entry.trash_id) == "Z"
 
 
-async def test_restore_over_a_twin_keeps_it_when_the_keyring_write_fails(w: World) -> None:
+async def _restore_twin_scenario(w: World) -> tuple[str, Credential]:
     old = make_credential("OLD", url="https://x.example", password="fake-old")
     await synced(w, old)
     w.local.remove("OLD")
@@ -446,11 +446,62 @@ async def test_restore_over_a_twin_keeps_it_when_the_keyring_write_fails(w: Worl
     (entry,) = w.engine.trash()
     live = make_credential("NEW", url="https://x.example", password="fake-live")
     await synced(w, live)
+    return entry.trash_id, live
+
+
+async def test_restore_over_a_twin_keeps_both_versions_when_the_keyring_write_fails(
+    w: World,
+) -> None:
+    entry_id, live = await _restore_twin_scenario(w)
     w.local.fail_next("upsert", LocalUnavailable("locked mid-restore"))
     with pytest.raises(LocalUnavailable):
-        await w.engine.restore(entry.trash_id)
+        await w.engine.restore(entry_id)
     assert w.local.items["NEW"] == live
-    assert w.engine.trash() == [entry]
+    assert {e.credential.password for e in w.engine.trash()} == {"fake-old", "fake-live"}
+
+
+async def test_restore_keeps_the_displaced_version_when_a_failed_write_landed(
+    w: World,
+) -> None:
+    entry_id, live = await _restore_twin_scenario(w)
+    write = w.local.upsert
+
+    async def write_then_lose_the_reply(credential: Credential) -> None:
+        await write(credential)
+        msg = "reply lost"
+        raise LocalUnavailable(msg)
+
+    w.local.upsert = write_then_lose_the_reply  # type: ignore[method-assign]
+    with pytest.raises(LocalUnavailable):
+        await w.engine.restore(entry_id)
+    assert w.local.items["NEW"].password == "fake-old"
+    assert live in [e.credential for e in w.engine.trash()]
+
+
+async def test_restore_finds_the_twin_icloud_read_back_without_its_default_port(
+    w: World,
+) -> None:
+    w.remote.unique_logins = True
+    winner = make_credential("A", url="https://x.example", username="u")
+    await synced(w, winner)
+    loser = make_credential("A", url="https://x.example:443", username="u", password="fake-l")
+    w.state.add_trash(TrashEntry("T", loser, T0, "conflict"))
+    assert await w.engine.restore("T") == "A"
+    report = await w.engine.run_once()
+    assert report.upload_failures == ()
+    assert list(w.remote.items) == ["A"]
+
+
+async def test_restore_prefers_the_twin_with_the_same_written_port(w: World) -> None:
+    # `https://x.example` and `https://x.example:443` are two keychain logins; restoring a
+    # `:443` version over the portless one would collide with the other on upload.
+    a = make_credential("A", url="https://x.example", username="u")
+    b = make_credential("B", url="https://x.example:443", username="u")
+    await synced(w, a, b)
+    version = make_credential("A", url="https://x.example:443", username="u", password="old")
+    w.state.add_trash(TrashEntry("T", version, T0, "conflict"))
+    assert await w.engine.restore("T") == "B"
+    assert w.local.items["A"] == a
 
 
 async def test_restore_prefers_the_twin_with_the_versions_own_id(w: World) -> None:
