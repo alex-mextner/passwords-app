@@ -15,7 +15,7 @@ import re
 from dataclasses import dataclass
 from enum import StrEnum, auto
 from typing import TYPE_CHECKING
-from urllib.parse import urlsplit
+from urllib.parse import SplitResult, urlsplit
 
 import idna
 from publicsuffixlist import PublicSuffixList
@@ -245,18 +245,17 @@ def login_identity(c: Credential, *, exact_port: bool = False) -> LoginIdentity 
         return None
     scheme = parts.scheme.lower()
     host = parts.hostname
-    if (
-        scheme not in _KEYCHAIN_DEFAULT_PORTS
-        or not host
-        or parts.fragment
-        or parts.username is not None
-        or parts.password is not None
-    ):
+    if scheme not in _KEYCHAIN_DEFAULT_PORTS or not host or not _storable(parts):
         return None
     if port == _KEYCHAIN_DEFAULT_PORTS[scheme] and not exact_port:
         port = 0
     path = parts.path + ("?" + parts.query if parts.query else "")
     return (host.lower(), c.username.lower(), scheme, port, path)
+
+
+def _storable(parts: SplitResult) -> bool:
+    """Whether the keychain can hold the url: it has no place for a fragment or user info."""
+    return not parts.fragment and parts.username is None and parts.password is None
 
 
 def _same_origin_rules_allow(page: _Url, cred: _Url) -> bool:
