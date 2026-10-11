@@ -2,7 +2,6 @@
 # SPDX-License-Identifier: MIT
 """The keychain client against the fake CloudKit gateway: real wire format, real crypto."""
 
-# ruff: noqa: S105, S106  fictional passwords are test fixtures, not secrets
 # pyright: reportPrivateUsage=false
 # Concurrency tests reach into the client's lock, store and cache to stage races.
 

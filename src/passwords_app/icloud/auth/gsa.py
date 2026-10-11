@@ -12,7 +12,6 @@ from __future__ import annotations
 import base64
 import hashlib
 import hmac
-import importlib
 import logging
 import plistlib
 from typing import TYPE_CHECKING, Any, Protocol, cast
@@ -20,6 +19,7 @@ from typing import TYPE_CHECKING, Any, Protocol, cast
 import requests
 from cryptography.hazmat.primitives import padding
 from cryptography.hazmat.primitives.ciphers import Cipher, algorithms, modes
+from srp import _pysrp
 
 from passwords_app.icloud import const, tls
 from passwords_app.icloud.auth.headers import identity_headers
@@ -40,7 +40,7 @@ if TYPE_CHECKING:
 
 # The untyped pure-Python backend: it exposes the RFC 5054 switches Apple's variant needs.
 # They are process-wide; nothing else in the app uses the srp module.
-_srp: Any = importlib.import_module("srp._pysrp")
+_srp: Any = _pysrp
 _srp.rfc5054_enable()
 _srp.no_username_in_x()
 
@@ -152,18 +152,7 @@ class GSAClient:
         init = self._request({"A2k": a_pub, "ps": list(_S2K_PROTOCOLS), "u": username, "o": "init"})
         self.last_init_response = init
         logger.debug("GSA init response keys: %s", list(init))
-        protocol = text(init, "sp")
-        if protocol is None:
-            msg = f"{stage}: init failed: {_status(init)}"
-            raise GSAError(msg)
-        if protocol not in _S2K_PROTOCOLS:
-            msg = f"unsupported protocol {protocol}"
-            raise GSAError(msg)
-        salt, server_b, iterations = blob(init, "s"), blob(init, "B"), integer(init, "i")
-        cookie = init.get("c")
-        if salt is None or server_b is None or iterations is None or cookie is None:
-            msg = f"{stage}: init answer is missing the SRP challenge"
-            raise GSAError(msg)
+        protocol, salt, server_b, iterations, cookie = _srp_challenge(init, stage)
 
         # The password key needs the server's salt and iteration count, so it is set late.
         usr.p = _encrypt_password(password, salt, iterations, protocol)
@@ -277,9 +266,28 @@ def _session_key(usr: _SrpUser, name: str) -> bytes:
     return hmac.new(k, name.encode(), hashlib.sha256).digest()
 
 
+def _srp_challenge(init: Record, stage: str) -> tuple[str, bytes, bytes, int, object]:
+    """Return the protocol, salt, B, iteration count and cookie of GSA's init answer."""
+    protocol = text(init, "sp")
+    if protocol is None:
+        msg = f"{stage}: init failed: {_status(init)}"
+        raise GSAError(msg)
+    if protocol not in _S2K_PROTOCOLS:
+        msg = f"unsupported protocol {protocol}"
+        raise GSAError(msg)
+    salt, server_b, iterations = blob(init, "s"), blob(init, "B"), integer(init, "i")
+    cookie = init.get("c")
+    if salt is None or server_b is None or iterations is None or cookie is None:
+        msg = f"{stage}: init answer is missing the SRP challenge"
+        raise GSAError(msg)
+    return protocol, salt, server_b, iterations, cookie
+
+
 def _decrypt_cbc(usr: _SrpUser, data: bytes) -> bytes:
     key = _session_key(usr, "extra data key:")
     iv = _session_key(usr, "extra data iv:")[:16]
+    # The server proved itself with M2 before this runs; the spd blob's cipher is Apple's choice.
+    # nosemgrep: crypto-mode-without-authentication - GSA's spd is AES-CBC by protocol
     dec = Cipher(algorithms.AES(key), modes.CBC(iv)).decryptor()
     data = dec.update(data) + dec.finalize()
     unpadder = padding.PKCS7(128).unpadder()

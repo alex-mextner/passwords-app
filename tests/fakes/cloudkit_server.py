@@ -43,7 +43,7 @@ if TYPE_CHECKING:
     from passwords_app.core.model import Credential
 
 USER_ID = "_fake-cloudkit-user"
-CK_TOKEN = "fake-cloudkit-token"  # noqa: S105 - the fake gateway's own session token
+CK_TOKEN = "fake-cloudkit-token"
 ZONE = "Passwords"
 _SF_TRAILER = b"\x00" * (97 + 16)  # SecurityFoundation's junk after the real ciphertext
 _SERVER_NOT_FOUND = 3

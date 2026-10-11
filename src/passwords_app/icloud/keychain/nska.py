@@ -65,25 +65,35 @@ class _Resolver:
     def resolve(self, node: object, depth: int) -> object:
         self._step(depth)
         if isinstance(node, plistlib.UID):
-            if not 0 <= node.data < len(self.objects):
-                msg = "archive reference out of range"
-                raise ArchiveError(msg)
-            return self.resolve(self.objects[node.data], depth + 1)
+            return self._dereference(node, depth)
         if node == "$null":
             return None
         if isinstance(node, dict):
-            if not all(isinstance(k, str) for k in cast("dict[object, object]", node)):
-                msg = "archive object has a key that is not a string"
-                raise ArchiveError(msg)
-            fields = cast("dict[str, object]", node)
-            out = {
-                k: self.resolve(v, depth + 1) for k, v in fields.items() if not k.startswith("$")
-            }
-            if "$class" in fields:  # an archived object: unwrap Foundation containers
-                for key in ("NS.data", "NS.string", "NS.objects"):
-                    if key in out:
-                        return out[key]
-            return out
+            return self._resolve_object(cast("dict[object, object]", node), depth)
         if isinstance(node, list):
             return [self.resolve(v, depth + 1) for v in cast("list[object]", node)]
         return node
+
+    def _dereference(self, uid: plistlib.UID, depth: int) -> object:
+        if not 0 <= uid.data < len(self.objects):
+            msg = "archive reference out of range"
+            raise ArchiveError(msg)
+        return self.resolve(self.objects[uid.data], depth + 1)
+
+    def _resolve_object(self, node: dict[object, object], depth: int) -> object:
+        if not all(isinstance(k, str) for k in node):
+            msg = "archive object has a key that is not a string"
+            raise ArchiveError(msg)
+        fields = cast("dict[str, object]", node)
+        out = {k: self.resolve(v, depth + 1) for k, v in fields.items() if not k.startswith("$")}
+        if "$class" in fields:  # an archived object: unwrap Foundation containers
+            return _foundation_payload(out)
+        return out
+
+
+def _foundation_payload(out: dict[str, object]) -> object:
+    """Return an NSData/NSString/NSArray's payload; any other archived object stays as is."""
+    for key in ("NS.data", "NS.string", "NS.objects"):
+        if key in out:
+            return out[key]
+    return out

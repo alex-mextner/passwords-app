@@ -1,7 +1,5 @@
 # SPDX-FileCopyrightText: 2026 Alex Mextner
 # SPDX-License-Identifier: MIT
-# Every password/token here is a fictional test value.
-# ruff: noqa: S105
 # These tests seed and inspect the account's session store directly.
 # pyright: reportPrivateUsage=false
 """`Account`: the sign-in state machine, the join, unattended refresh, and opening the store.

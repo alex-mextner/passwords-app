@@ -75,6 +75,19 @@ def authenticated_data_v2(
         "gen": _le8(gen),
         "wrappedkey": parent_key_id.encode(),  # the parent class key's id, not the wrapped key
     }
+    aad.update(_pcs_aad(fields))
+    for name, val in fields.items():
+        if name in _AAD_EXCLUDED or name.startswith("server_"):
+            continue
+        value = _aad_value(val)
+        if value is not None:
+            aad[name] = value
+    return [aad[k] for k in sorted(aad)]
+
+
+def _pcs_aad(fields: Mapping[str, FieldValue]) -> dict[str, bytes]:
+    """Return the PCS fields' associated data, which the general rule leaves out."""
+    aad: dict[str, bytes] = {}
     service = fields.get("pcsservice")
     if isinstance(service, int):
         aad["pcsservice"] = _le8(service)
@@ -82,22 +95,23 @@ def authenticated_data_v2(
         v = fields.get(pcs)
         if isinstance(v, bytes):
             aad[pcs] = v
-    for name, val in fields.items():
-        if name in _AAD_EXCLUDED or name.startswith("server_"):
-            continue
-        match val:
-            case str():
-                aad[name] = val.encode()
-            case bytes():
-                aad[name] = val
-            case CKDate(time):
-                stamp = datetime.fromtimestamp(int(time), tz=UTC)
-                aad[name] = stamp.strftime("%Y-%m-%dT%H:%M:%SZ").encode()
-            case float() | int():
-                aad[name] = _le8(int(val))
-            case _:
-                pass  # references and opaque values are not authenticated
-    return [aad[k] for k in sorted(aad)]
+    return aad
+
+
+def _aad_value(val: FieldValue) -> bytes | None:
+    """Return a field's associated-data bytes, or None for a value that is not authenticated."""
+    match val:
+        case str():
+            return val.encode()
+        case bytes():
+            return val
+        case CKDate(time):
+            stamp = datetime.fromtimestamp(int(time), tz=UTC)
+            return stamp.strftime("%Y-%m-%dT%H:%M:%SZ").encode()
+        case float() | int():
+            return _le8(int(val))
+        case _:
+            return None  # references and opaque values are not authenticated
 
 
 def unwrap_tlkshares(

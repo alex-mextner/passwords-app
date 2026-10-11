@@ -128,6 +128,7 @@ def build_header(  # noqa: PLR0913 - one knob per Header field a caller may vary
     isolation: int = ISOLATION_ZONE,
 ) -> bytes:
     """RequestOperation.Header (userToken stays empty: the token travels as an HTTP header)."""
+    # nosemgrep: insecure-hash-algorithm-sha1 - CloudKit's Header.deviceHash is SHA-1 by protocol
     device_hash = hashlib.sha1(config.device_uuid.encode(), usedforsecurity=False).hexdigest()
     return (
         Writer()
@@ -477,20 +478,7 @@ class CloudKitTransport:
         )
         body = gzip.compress(build_batch(header, ops))
         messages = self._post(path, body, self._headers(bundle, routing_hint, database=database))
-        results = [_parse_checked(m) for m in messages]
-        if len(ops) == 1 and len(results) == 1 and results[0].uuid is None:
-            return results  # a lone answer needs no matching
-        uuids = [r.uuid for r in results]
-        if len(results) != len(ops) or None in uuids or len(set(uuids)) != len(uuids):
-            # An extra, unnamed or repeated answer contradicts the others; dropping it could
-            # turn a refused write into an acknowledged one.
-            msg = f"{path} gave {len(results)} answers that do not match its {len(ops)} operations"
-            raise CloudKitError(msg)
-        by_uuid = {r.uuid: r for r in results}
-        if any(op.uuid not in by_uuid for op in ops):
-            msg = f"{path} answered {len(results)} of {len(ops)} operations"
-            raise CloudKitError(msg)
-        return [by_uuid[op.uuid] for op in ops]
+        return _in_request_order(path, ops, [_parse_checked(m) for m in messages])
 
     def _perform(
         self,
@@ -582,3 +570,28 @@ def _parse_checked(raw: bytes) -> CloudKitResult:
     except _proto.ProtoError as e:
         msg = "CloudKit returned a malformed response operation"
         raise CloudKitError(msg) from e
+
+
+def _in_request_order(
+    path: str, ops: Sequence[Operation], results: list[CloudKitResult]
+) -> list[CloudKitResult]:
+    """Return a batch's results in the order of its operations, matched by operation id."""
+    if len(ops) == 1 and len(results) == 1 and results[0].uuid is None:
+        return results  # a lone answer needs no matching
+    uuids = [r.uuid for r in results]
+    if len(results) != len(ops) or None in uuids or len(set(uuids)) != len(uuids):
+        # An extra, unnamed or repeated answer contradicts the others; dropping it could
+        # turn a refused write into an acknowledged one.
+        msg = f"{path} gave {len(results)} answers that do not match its {len(ops)} operations"
+        raise CloudKitError(msg)
+    return _by_operation_id(path, ops, results)
+
+
+def _by_operation_id(
+    path: str, ops: Sequence[Operation], results: list[CloudKitResult]
+) -> list[CloudKitResult]:
+    by_uuid = {r.uuid: r for r in results}
+    if any(op.uuid not in by_uuid for op in ops):
+        msg = f"{path} answered {len(results)} of {len(ops)} operations"
+        raise CloudKitError(msg)
+    return [by_uuid[op.uuid] for op in ops]

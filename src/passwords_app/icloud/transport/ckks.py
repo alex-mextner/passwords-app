@@ -217,9 +217,7 @@ def _utf8(raw: bytes | None) -> str | None:
         return None
 
 
-def parse_value(  # noqa: PLR0911 - one return per proto value variant
-    raw: bytes, zone: ZoneId | None = None
-) -> FieldValue:
+def parse_value(raw: bytes, zone: ZoneId | None = None) -> FieldValue:
     """Record.Field.Value -> python value, by its type tag (or the field present, untagged).
 
     A type this module does not model, or a payload that disagrees with its tag, stays `CKRaw`
@@ -230,6 +228,16 @@ def parse_value(  # noqa: PLR0911 - one return per proto value variant
     tag = first_int(v, 1)
     if tag is not None and tag not in _KNOWN_TAGS:
         return CKRaw(raw)
+    # Tried in this order, each only when the earlier ones found nothing.
+    value: FieldValue | None = _scalar_value(v, tag)
+    if value is None:
+        value = _date_value(v, tag)
+    if value is None:
+        value = _reference_value(v, tag, zone)
+    return CKRaw(raw) if value is None else value
+
+
+def _scalar_value(v: Fields, tag: int | None) -> bytes | str | int | float | None:
     if tag in {None, _T_BYTES} and (b := first_bytes(v, 2)) is not None:
         return b
     if tag in {None, _T_STRING} and (s := _utf8(first_bytes(v, 7))) is not None:
@@ -238,16 +246,24 @@ def parse_value(  # noqa: PLR0911 - one return per proto value variant
         return as_int64(i)
     if tag in {None, _T_DOUBLE} and (d := _double_bits(v, 5)) is not None:
         return d
+    return None
+
+
+def _date_value(v: Fields, tag: int | None) -> CKDate | None:
     date = first_message(v, 6) if tag in {None, _T_DATE} else None
     if date is not None and (t := _double_bits(date, 1)) is not None:
         return CKDate(t)
+    return None
+
+
+def _reference_value(v: Fields, tag: int | None, zone: ZoneId | None) -> CKReference | None:
     ref = first_message(v, 9) if tag in {None, _T_REFERENCE} else None
     if ref is not None and (rid := first_bytes(ref, 2)) is not None:
         name, target = _parse_record_id(rid)
         foreign = target if target is not None and target != zone else None
         action = first_int(ref, 1)
         return CKReference(name, REF_VALIDATING if action is None else action, foreign)
-    return CKRaw(raw)
+    return None
 
 
 def encode_value(value: FieldValue, zone: ZoneId) -> bytes:
@@ -374,6 +390,15 @@ def _parse_change(raw: bytes, zone: ZoneId | None) -> RecordChange:
             raise ProtoError(msg)
     rid = first_bytes(cf, 1)
     etag = first_str(cf, 2)
+    record = _change_record(cf, etag)
+    name, change_zone = _parse_record_id(rid) if rid is not None else ("", None)
+    _require_zone(zone, change_zone, record.zone if record is not None else None)
+    name = _change_name(name, record)
+    return RecordChange(name, etag or (record.etag if record else None), record)
+
+
+def _change_record(cf: Fields, etag: str | None) -> CloudKitRecord | None:
+    """Return a change entry's record (None for a deletion), carrying the entry's tag."""
     rec_raw = first_bytes(cf, 5)
     if rec_raw is None and cf.get(5):
         # Only an absent record means "deleted"; a field of the wrong wire type is damage,
@@ -383,8 +408,11 @@ def _parse_change(raw: bytes, zone: ZoneId | None) -> RecordChange:
     record = parse_record(rec_raw) if rec_raw is not None else None
     if record is not None and record.etag is None and etag is not None:
         record = dataclasses.replace(record, etag=etag)
-    name, change_zone = _parse_record_id(rid) if rid is not None else ("", None)
-    _require_zone(zone, change_zone, record.zone if record is not None else None)
+    return record
+
+
+def _change_name(name: str, record: CloudKitRecord | None) -> str:
+    """Return the record name a change entry is about, refusing one it contradicts or lacks."""
     if record is not None:
         if not record.record_name or not record.type:
             msg = "change entry carries a record without a name or type"
@@ -397,7 +425,7 @@ def _parse_change(raw: bytes, zone: ZoneId | None) -> RecordChange:
         # Skipping it would still adopt the page's token, losing this change for good.
         msg = "change entry names no record"
         raise ProtoError(msg)
-    return RecordChange(name, etag or (record.etag if record else None), record)
+    return name
 
 
 def build_save_request(record: CloudKitRecord, *, create: bool) -> bytes:

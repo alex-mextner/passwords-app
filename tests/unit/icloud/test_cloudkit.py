@@ -1,7 +1,5 @@
 # SPDX-FileCopyrightText: 2026 Alex Mextner
 # SPDX-License-Identifier: MIT
-# The sync token is a fictional test value.
-# ruff: noqa: S105
 # These tests poke the transport's framing helpers and fake raw response bodies.
 # pyright: reportPrivateUsage=false
 """CloudKit framing: batches, headers, response matching, result errors (no network)."""

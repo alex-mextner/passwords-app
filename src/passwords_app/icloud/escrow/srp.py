@@ -181,6 +181,8 @@ def _aes_cbc_decrypt(key: bytes, iv: bytes, ct: bytes) -> bytes:
     if not ct or len(ct) % _AES_BLOCK or len(iv) != _AES_BLOCK:
         msg = "escrow payload is not whole AES blocks"
         raise EscrowError(msg)
+    # The caller checks the SRP server proof first; GCM-versioned records never come here.
+    # nosemgrep: crypto-mode-without-authentication - escrowproxy's records are CBC by protocol
     dec = Cipher(algorithms.AES(key), modes.CBC(iv)).decryptor()
     out = dec.update(ct) + dec.finalize()
     pad = out[-1]

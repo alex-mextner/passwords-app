@@ -215,21 +215,11 @@ class KeychainClient:
             item = existing.login.item
             prev_item, prev_side = existing.item, existing.sidecar
             side_attrs = existing.login.sidecar.attrs if existing.login.sidecar else None
-        key = passwords.primary_key(attrs.item)
-        for other in logins.values():
-            if other.item.record_name != item.record_name and (
-                passwords.primary_key(other.login.item.attrs) == key
-            ):
-                msg = f"another login for {cred.username!r} on {cred.url} already exists"
-                raise passwords.DuplicateLoginError(msg)
+        _refuse_duplicate(cred, attrs.item, item.record_name, logins)
         # The version token covers both records, so a save touching either one rewrites the
         # other unchanged too: its change tag then guards the batch against a concurrent edit
         # or deletion of the record this edit would otherwise not mention.
-        side_name = None
-        if attrs.sidecar is not None:
-            side_name = (
-                prev_side.record_name if prev_side is not None else str(uuid.uuid4()).upper()
-            )
+        side_name = _sidecar_name(attrs, prev_side)
         item_changed = attrs.item != item.attrs
         side_changed = attrs.sidecar is not None and attrs.sidecar != side_attrs
         if not (item_changed or side_changed):
@@ -285,6 +275,31 @@ class KeychainClient:
         for name, _ in names:
             state.records.pop(name, None)
         self._cache.save()
+
+
+def _refuse_duplicate(
+    cred: Credential,
+    item: passwords.Attributes,
+    record_name: str,
+    logins: Mapping[str, StoredLogin],
+) -> None:
+    """Refuse a save giving `item` the primary key of another stored login."""
+    key = passwords.primary_key(item)
+    for other in logins.values():
+        if other.item.record_name != record_name and (
+            passwords.primary_key(other.login.item.attrs) == key
+        ):
+            msg = f"another login for {cred.username!r} on {cred.url} already exists"
+            raise passwords.DuplicateLoginError(msg)
+
+
+def _sidecar_name(
+    attrs: passwords.LoginAttributes, prev_side: ckks.CloudKitRecord | None
+) -> str | None:
+    """Return the sidecar's record name: its current one, or a fresh one for a new sidecar."""
+    if attrs.sidecar is None:
+        return None
+    return prev_side.record_name if prev_side is not None else str(uuid.uuid4()).upper()
 
 
 def _check(results: Sequence[CloudKitResult], what: str) -> None:

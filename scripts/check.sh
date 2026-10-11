@@ -24,11 +24,7 @@ RIG_MANAGED_RE='^(ci/|\.serena/|\.haft/|\.github/workflows/(codeql|dependency-re
 # Spec §12: coverage >= 90% for the packages that decide what gets written or deleted.
 COVERAGE_INCLUDE='src/passwords_app/core/*,src/passwords_app/sync/*,src/passwords_app/store/*,src/passwords_app/keyring/*'
 COVERAGE_MIN=90
-# TEMPORARY (#50): the vendored legacy iCloud client predates these gates; the iCloud client
-# PR (feat/icloud-client) replaces and lint-cleans it and must delete this exclusion and every
-# other one marked #50 (here and in pyproject.toml). Nothing else may be added to it.
-LEGACY_ICLOUD=(src/passwords_app/icloud tests/unit/icloud)
-PYTEST_COMMON=(-p no:cacheprovider -q "${LEGACY_ICLOUD[@]/#/--ignore=}")
+PYTEST_COMMON=(-p no:cacheprovider -q)
 PYTEST_FAST_EXCLUDE='not integration and not e2e and not gui and not browser and not live and not benchmark'
 
 # Group order is the run order of `all`: cheap static gates first, slow suites last.
@@ -175,8 +171,7 @@ gate_vulture() { run_gate vulture vulture -- "$(tool vulture)"; }
 gate_deptry() { run_gate deptry deptry -- "$(tool deptry)" .; }
 # B = cyclomatic complexity <= 10 per block, matching ruff's C901 default.
 gate_xenon() {
-  run_gate xenon xenon -- "$(tool xenon)" --max-absolute B --max-modules A --max-average A \
-    --exclude "${LEGACY_ICLOUD[0]}/*" src # TEMPORARY (#50)
+  run_gate xenon xenon -- "$(tool xenon)" --max-absolute B --max-modules A --max-average A src
 }
 gate_reuse() { run_gate reuse reuse -- "$(tool reuse)" lint; }
 
@@ -253,8 +248,7 @@ semgrep_args() {
 gate_semgrep() {
   local -a args
   mapfile -t args < <(semgrep_args)
-  run_gate semgrep semgrep -- "$(tool semgrep)" "${args[@]}" \
-    "${LEGACY_ICLOUD[@]/#/--exclude=}" src tests scripts # TEMPORARY (#50)
+  run_gate semgrep semgrep -- "$(tool semgrep)" "${args[@]}" src tests scripts
 }
 
 # Audits the declared dependency closure, not the venv: the venv sees Ubuntu's system

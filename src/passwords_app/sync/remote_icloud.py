@@ -81,7 +81,7 @@ class ICloudRemoteStore:
                     if attempt:
                         msg = "iCloud keeps rejecting the sign-in; sign in again"
                         raise AuthRequired(msg) from e
-                    logger.info("iCloud token rejected; reconnecting")
+                    logger.info("iCloud rejected the session; reconnecting")
                 except (AppleError, requests.RequestException, OSError, ValueError) as e:
                     raise _translate(e) from e
         msg = "unreachable"  # pragma: no cover - the loop always returns or raises

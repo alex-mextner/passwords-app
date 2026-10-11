@@ -11,6 +11,10 @@ from __future__ import annotations
 
 import plistlib
 from typing import TypeIs, cast
+
+# Only the exception class comes from xml; nothing here parses XML. plistlib, the app's only
+# XML parser, rejects entity declarations, so XXE and entity-expansion bombs fail to load.
+# nosemgrep: use-defused-xml - imports ExpatError only (see above)
 from xml.parsers.expat import ExpatError
 
 Record = dict[str, object]

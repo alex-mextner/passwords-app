@@ -2,8 +2,6 @@
 # SPDX-License-Identifier: MIT
 """`ICloudRemoteStore`: the sync engine's view of iCloud, over the fake gateway."""
 
-# ruff: noqa: S105, S106  fictional passwords are test fixtures, not secrets
-
 from __future__ import annotations
 
 import dataclasses

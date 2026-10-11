@@ -118,9 +118,6 @@ exclude_also = ["if TYPE_CHECKING:", "raise NotImplementedError", "\\.\\.\\.$"]
 line-length = 100
 target-version = "py313"
 src = ["src", "tests"]
-# TEMPORARY (#50): the vendored legacy iCloud client predates the gates; feat/icloud-client
-# replaces it and deletes every exclusion marked #50.
-extend-exclude = ["src/passwords_app/icloud", "tests/unit/icloud"]
 
 [tool.ruff.lint]
 select = ["ALL"]
@@ -150,7 +147,6 @@ mypy_path = ["src", "."]
 explicit_package_bases = true
 warn_unreachable = true
 enable_error_code = ["ignore-without-code", "redundant-expr", "truthy-bool", "possibly-undefined", "explicit-override"]
-exclude = ['^src/passwords_app/icloud/', '^tests/unit/icloud/']  # TEMPORARY (#50)
 
 [[tool.mypy.overrides]]
 module = ["srp.*", "zxcvbn.*", "publicsuffixlist.*", "secretstorage.*"]
@@ -158,7 +154,6 @@ ignore_missing_imports = true
 
 [tool.pyright]
 include = ["src"]
-exclude = ["src/passwords_app/icloud"]  # TEMPORARY (#50)
 # No venvPath/venv here: in that mode pyright reads only the venv's own site-packages and misses
 # Ubuntu's dist-packages (pycairo). Run it with the venv's interpreter instead (an activated
 # venv, or `--pythonpath .venv/bin/python` as scripts/check.sh does) so it sees the venv's
@@ -172,16 +167,15 @@ reportMissingTypeStubs = false
 reportMissingModuleSource = false
 
 [tool.bandit]
-exclude_dirs = ["tests", "src/passwords_app/icloud"]  # TEMPORARY (#50): src/passwords_app/icloud
+exclude_dirs = ["tests"]
 
 [tool.codespell]
-skip = "*.lock,*.svg,*.po,./extension/node_modules,./.venv,./src/passwords_app/icloud,./tests/unit/icloud"  # TEMPORARY (#50): the two icloud paths
+skip = "*.lock,*.svg,*.po,./extension/node_modules,./.venv"
 ignore-words-list = "acct,ser,srvr,ptcl,sdmn,agrp,unparseable"
 
 [tool.vulture]
 paths = ["src"]
 min_confidence = 80
-exclude = ["src/passwords_app/icloud/"]  # TEMPORARY (#50)
 
 [tool.deptry]
 known_first_party = ["passwords_app"]
@@ -190,4 +184,3 @@ known_first_party = ["passwords_app"]
 DEP001 = ["gi"]
 # TEMPORARY: declared ahead of its first importer, feat/keyring (#6), which deletes this entry.
 DEP002 = ["dbus-fast"]
-DEP003 = ["urllib3"]  # TEMPORARY (#50): imported only by the legacy icloud client

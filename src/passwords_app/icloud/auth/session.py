@@ -48,11 +48,13 @@ class _SecretItem(Protocol):
 
 
 class _Collection(Protocol):
+    # Positional-only, as this app calls them; the `_` names mark the stubs' parameters as never
+    # read (vulture would otherwise report them as unused variables).
     def is_locked(self) -> bool: ...
     def unlock(self) -> bool: ...
-    def search_items(self, attributes: dict[str, str]) -> Iterable[_SecretItem]: ...
+    def search_items(self, _attributes: dict[str, str], /) -> Iterable[_SecretItem]: ...
     def create_item(
-        self, label: str, attributes: dict[str, str], secret: bytes, *, replace: bool
+        self, _label: str, _attributes: dict[str, str], _secret: bytes, /, *, replace: bool
     ) -> object: ...
 
 
@@ -77,7 +79,7 @@ def _default_collection() -> _Collection | None:
         conn = secretstorage.dbus_init()
         return cast("_Collection", secretstorage.get_default_collection(conn))
     except Exception as e:  # noqa: BLE001 - no bus, no keyring daemon, no collection: fall back
-        logger.warning("Secret Service unavailable (%s); using the key file", type(e).__name__)
+        logger.warning("D-Bus keyring unavailable (%s); using the key file", type(e).__name__)
         return None
 
 

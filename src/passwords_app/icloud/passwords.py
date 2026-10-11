@@ -145,6 +145,12 @@ def pair_logins(items: Iterable[StoredItem]) -> list[Login]:
     nothing, since any choice could show one login's notes on another; each sidecar joins at
     most one login.
     """
+    logins, sidecars = _logins_and_sidecars(items)
+    joined = _join_sidecars(logins, sidecars)
+    return [Login(it, joined.get(it.record_name)) for it in logins]
+
+
+def _logins_and_sidecars(items: Iterable[StoredItem]) -> tuple[list[StoredItem], list[StoredItem]]:
     logins: list[StoredItem] = []
     sidecars: list[StoredItem] = []
     for it in items:
@@ -152,6 +158,11 @@ def pair_logins(items: Iterable[StoredItem]) -> list[Login]:
             logins.append(it)
         elif is_sidecar(it.attrs):
             sidecars.append(it)
+    return logins, sidecars
+
+
+def _join_sidecars(logins: list[StoredItem], sidecars: list[StoredItem]) -> dict[str, StoredItem]:
+    """Each joined login's sidecar, by the login's record name (see `pair_logins`)."""
     joined: dict[str, StoredItem] = {}
     for key in (primary_key, _fallback_key):
         taken = {s.record_name for s in joined.values()}
@@ -160,7 +171,7 @@ def pair_logins(items: Iterable[StoredItem]) -> list[Login]:
         for k, login in free_logins.items():
             if (side := free_sides.get(k)) is not None:
                 joined[login.record_name] = side
-    return [Login(it, joined.get(it.record_name)) for it in logins]
+    return joined
 
 
 def _unique_by(
@@ -254,17 +265,31 @@ def otpauth_from_totp(block: object, *, account: str = "") -> str | None:
     secret = totp.get("secret")
     if not isinstance(secret, bytes) or not secret:
         return None
-    original = _text(totp, "originalURL")
-    if original.startswith("otpauth://totp/"):
-        try:
-            parsed = totp_from_otpauth(original)
-        except UnsupportedCredentialError:
-            parsed = {}
-        if all(parsed.get(k) == totp.get(k, _OTP_DEFAULTS.get(k)) for k in _OTP_FIELDS):
-            return original
+    original = _current_original_url(totp)
+    if original is not None:
+        return original
     issuer = _text(totp, "issuer")
     name = _text(totp, "accountName") or account
     label = ":".join(p for p in (issuer, name) if p) or "iCloud"
+    params = _otpauth_params(totp, secret, issuer)
+    return f"otpauth://totp/{urllib.parse.quote(label)}?{urllib.parse.urlencode(params)}"
+
+
+def _current_original_url(totp: Mapping[str, object]) -> str | None:
+    """Return a `totp` dictionary's `originalURL` while it still describes the same code."""
+    original = _text(totp, "originalURL")
+    if not original.startswith("otpauth://totp/"):
+        return None
+    try:
+        parsed = totp_from_otpauth(original)
+    except UnsupportedCredentialError:
+        parsed = {}
+    if all(parsed.get(k) == totp.get(k, _OTP_DEFAULTS.get(k)) for k in _OTP_FIELDS):
+        return original
+    return None
+
+
+def _otpauth_params(totp: Mapping[str, object], secret: bytes, issuer: str) -> dict[str, str]:
     algorithm = totp.get("algorithm")
     params: dict[str, str] = {"secret": base64.b32encode(secret).decode().rstrip("=")}
     if isinstance(algorithm, int) and 0 <= algorithm < len(_TOTP_ALGORITHMS):
@@ -275,7 +300,7 @@ def otpauth_from_totp(block: object, *, account: str = "") -> str | None:
             params[key] = str(value)
     if issuer:
         params["issuer"] = issuer
-    return f"otpauth://totp/{urllib.parse.quote(label)}?{urllib.parse.urlencode(params)}"
+    return params
 
 
 def _alt_sites(payload: Mapping[str, object]) -> tuple[str, ...]:
@@ -305,22 +330,11 @@ def to_credential(
     url = url_of(attrs)
     if url is None:
         return None
-    password = attrs.get("v_Data", b"")
-    try:
-        secret = password.decode("utf-8") if isinstance(password, bytes) else None
-    except UnicodeDecodeError:
-        secret = None
-    if secret is None:
-        msg = f"the password of {login.record_name} is not text"
-        raise UnreadableLoginError(msg)
+    secret = _password_text(login)
     payload = sidecar_payload(login.sidecar)
     username = _text(attrs, "acct")
     created = _aware(attrs.get("cdat")) or _APPLE_EPOCH
-    modified = _aware(attrs.get("mdat")) or created
-    if login.sidecar is not None:
-        side_modified = _aware(login.sidecar.attrs.get("mdat"))
-        if side_modified is not None and side_modified > modified:
-            modified = side_modified
+    modified = _modified(login, created)
     return Credential(
         id=item_id or login.record_name,
         url=url,
@@ -334,6 +348,28 @@ def to_credential(
         alt_urls=_alt_sites(payload),
         group=group,
     )
+
+
+def _password_text(login: Login) -> str:
+    password = login.item.attrs.get("v_Data", b"")
+    try:
+        secret = password.decode("utf-8") if isinstance(password, bytes) else None
+    except UnicodeDecodeError:
+        secret = None
+    if secret is None:
+        msg = f"the password of {login.record_name} is not text"
+        raise UnreadableLoginError(msg)
+    return secret
+
+
+def _modified(login: Login, created: datetime) -> datetime:
+    """Return the later of the login's and its sidecar's modification times."""
+    modified = _aware(login.item.attrs.get("mdat")) or created
+    if login.sidecar is not None:
+        side_modified = _aware(login.sidecar.attrs.get("mdat"))
+        if side_modified is not None and side_modified > modified:
+            modified = side_modified
+    return modified
 
 
 # --- writing ---------------------------------------------------------------------------------
@@ -370,27 +406,14 @@ def totp_from_otpauth(uri: str, previous: object = None) -> Attributes:
         msg = "only otpauth://totp one-time codes are supported"
         raise UnsupportedCredentialError(msg)
     query = {k: v[0] for k, v in urllib.parse.parse_qs(parts.query).items() if v}
-    raw = query.get("secret", "").replace(" ", "").upper()
-    try:
-        secret = base64.b32decode(raw + "=" * (-len(raw) % 8))
-    except (binascii.Error, ValueError) as e:
-        msg = "the one-time-code secret is not base32"
-        raise UnsupportedCredentialError(msg) from e
-    if not secret:
-        msg = "the one-time-code setup has no secret"
-        raise UnsupportedCredentialError(msg)
+    secret = _otp_secret(query)
     label = urllib.parse.unquote(parts.path.lstrip("/"))
     label_issuer, _, label_account = label.rpartition(":")
     totp: Attributes = (
         dict(cast("dict[str, object]", previous)) if isinstance(previous, dict) else {}
     )
     totp["secret"] = secret
-    algorithm = query.get("algorithm", "SHA1").upper()
-    totp["algorithm"] = _TOTP_ALGORITHMS.index(algorithm) if algorithm in _TOTP_ALGORITHMS else 0
-    for key, default in (("digits", 6), ("period", 30)):
-        value = query.get(key, "")
-        # isascii: "²".isdigit() is true, but int() refuses it.
-        totp[key] = int(value) if value.isascii() and value.isdigit() else default
+    totp.update(_otp_settings(query))
     issuer = query.get("issuer") or label_issuer
     if issuer:
         totp["issuer"] = issuer
@@ -402,6 +425,32 @@ def totp_from_otpauth(uri: str, previous: object = None) -> Attributes:
     return totp
 
 
+def _otp_secret(query: Mapping[str, str]) -> bytes:
+    raw = query.get("secret", "").replace(" ", "").upper()
+    try:
+        secret = base64.b32decode(raw + "=" * (-len(raw) % 8))
+    except (binascii.Error, ValueError) as e:
+        msg = "the one-time-code secret is not base32"
+        raise UnsupportedCredentialError(msg) from e
+    if not secret:
+        msg = "the one-time-code setup has no secret"
+        raise UnsupportedCredentialError(msg)
+    return secret
+
+
+def _otp_settings(query: Mapping[str, str]) -> Attributes:
+    """`algorithm`, `digits` and `period` from an otpauth query, defaulting what is missing."""
+    algorithm = query.get("algorithm", "SHA1").upper()
+    settings: Attributes = {
+        "algorithm": _TOTP_ALGORITHMS.index(algorithm) if algorithm in _TOTP_ALGORITHMS else 0
+    }
+    for key, default in (("digits", 6), ("period", 30)):
+        value = query.get(key, "")
+        # isascii: "²".isdigit() is true, but int() refuses it.
+        settings[key] = int(value) if value.isascii() and value.isdigit() else default
+    return settings
+
+
 def _item_hash(attrs: Mapping[str, object]) -> bytes:
     """`sha1`: a digest of the item's content.
 
@@ -409,6 +458,7 @@ def _item_hash(attrs: Mapping[str, object]) -> bytes:
     stable content digest keeps unchanged items byte-identical across rewrites.
     """
     body = {k: v for k, v in attrs.items() if k != "sha1"}
+    # nosemgrep: insecure-hash-algorithm-sha1 - the keychain schema's `sha1` content fingerprint
     return hashlib.sha1(_plist(body), usedforsecurity=False).digest()
 
 

@@ -146,8 +146,8 @@ class JoinPeerAssemblyTests(unittest.TestCase):
     def test_trust_from_changes(self) -> None:
         sponsor = "SHA256:sponsor"
         changes = self._changes(sponsor, [sponsor, "SHA256:other"], 7, 9)
-        includeds, stable_clock, dyn_clock = octagon.trust_from_changes(changes, sponsor)
-        assert includeds == [sponsor, "SHA256:other"]
+        included_ids, stable_clock, dyn_clock = octagon.trust_from_changes(changes, sponsor)
+        assert included_ids == [sponsor, "SHA256:other"]
         assert stable_clock == 10  # max stable (9) + 1
         assert dyn_clock == 8  # sponsor dynamic (7) + 1
 

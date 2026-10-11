@@ -136,7 +136,7 @@ class RequestResponseTests(unittest.TestCase):
         resp = _proto.Writer().message(1, changes).finish()
 
         out = cf.parse_fetch_changes_response(resp)
-        assert out.sync_token == "newtok"  # noqa: S105 - fictional sync token, not a secret
+        assert out.sync_token == "newtok"
         assert len(out.peers) == 1
         assert out.peers[0].hash == "SHA256:p"
         permanent = out.peers[0].permanent_info

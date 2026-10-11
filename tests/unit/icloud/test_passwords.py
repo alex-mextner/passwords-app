@@ -2,7 +2,6 @@
 # SPDX-License-Identifier: MIT
 """Login item + sidecar <-> Credential mapping, over real-shaped keychain attributes."""
 
-# ruff: noqa: S106  fictional passwords are test fixtures, not secrets
 # pyright: reportPrivateUsage=false
 # The URL-attribute mapping is exercised directly as a unit.
 

@@ -133,8 +133,8 @@ def build_join_peer(  # noqa: PLR0913, PLR0917 - the peer plus the live trust st
     """Re-sign stable and dynamic info for the join and encode the CuttlefishPeer."""
     our_peer_id = text(oct_state, "peer_id") or ""
     stable = _stable(keys, stable_clock, serial)
-    includeds = list(dict.fromkeys([*included_peer_ids, our_peer_id]))
-    dynamic = ok.build_dynamic_info(keys, clock=dynamic_clock, included_peer_ids=includeds)
+    included_ids = list(dict.fromkeys([*included_peer_ids, our_peer_id]))
+    dynamic = ok.build_dynamic_info(keys, clock=dynamic_clock, included_peer_ids=included_ids)
     perm = child(oct_state, "permanent")
     return cf.encode_cuttlefish_peer(
         our_peer_id,
@@ -304,12 +304,12 @@ class OctagonClient:
         oct_state = child(self.record, "octagon")
         voucher = identity.make_voucher(text(oct_state, "peer_id") or "")
         changes = self.fetch_changes()
-        includeds, stable_clock, dyn_clock = trust_from_changes(changes, identity.peer_id)
+        included_ids, stable_clock, dyn_clock = trust_from_changes(changes, identity.peer_id)
         peer = build_join_peer(
             oct_state,
             load_peer_keys(oct_state),
             voucher,
-            includeds or [identity.peer_id],
+            included_ids or [identity.peer_id],
             stable_clock,
             dyn_clock,
             self.device.serial or _DEFAULT_SERIAL,

@@ -104,6 +104,6 @@ def test_non_string_object_key_is_an_archive_error(monkeypatch: pytest.MonkeyPat
     def loads(_data: bytes, **_kw: object) -> object:
         return archive
 
-    monkeypatch.setattr(nska.plistlib, "loads", loads)
+    monkeypatch.setattr(plistlib, "loads", loads)
     with pytest.raises(nska.ArchiveError, match="not a string"):
         nska.expand(b"ignored")
