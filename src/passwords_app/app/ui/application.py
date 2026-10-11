@@ -77,7 +77,10 @@ def _report_first_frame(window: Gtk.Window, marker: Path) -> None:
 
         def painted(_clock: Gdk.FrameClock) -> None:
             clock.disconnect(handler)
-            marker.write_text(f"{time.monotonic():.6f}\n", encoding="ascii")
+            # Renamed into place: the benchmark reads the marker as soon as it exists.
+            staged = marker.with_name(f"{marker.name}.tmp")
+            staged.write_text(f"{time.monotonic():.6f}\n", encoding="ascii")
+            staged.replace(marker)
 
         handler = clock.connect("after-paint", painted)
 
