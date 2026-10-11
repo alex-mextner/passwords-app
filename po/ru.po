@@ -6,7 +6,7 @@ msgid ""
 msgstr ""
 "Project-Id-Version: passwords-app 0.1.0\n"
 "Report-Msgid-Bugs-To: \n"
-"POT-Creation-Date: 2026-10-11 01:39+0200\n"
+"POT-Creation-Date: 2026-10-11 03:00+0200\n"
 "PO-Revision-Date: 2026-10-10 22:40+0200\n"
 "Last-Translator: Alex Mextner\n"
 "Language-Team: Russian\n"
@@ -1156,6 +1156,7 @@ msgid "Enter a website"
 msgstr "Введите веб-сайт"
 
 #: src/passwords_app/app/validation.py:57
+#: src/passwords_app/app/validation.py:64
 msgid "Use a web address such as example.com"
 msgstr "Укажите веб-адрес, например example.com"
 
@@ -1163,23 +1164,23 @@ msgstr "Укажите веб-адрес, например example.com"
 msgid "This is not a valid web address"
 msgstr "Недопустимый веб-адрес"
 
-#: src/passwords_app/app/validation.py:68
+#: src/passwords_app/app/validation.py:72
 msgid "A setup key contains only letters A–Z and digits 2–7"
 msgstr "Ключ настройки содержит только буквы A–Z и цифры 2–7"
 
-#: src/passwords_app/app/validation.py:74
+#: src/passwords_app/app/validation.py:78
 msgid "This setup key is incomplete"
 msgstr "Ключ настройки неполный"
 
-#: src/passwords_app/app/validation.py:76
+#: src/passwords_app/app/validation.py:80
 msgid "This setup key is too short"
 msgstr "Ключ настройки слишком короткий"
 
-#: src/passwords_app/app/validation.py:92
+#: src/passwords_app/app/validation.py:96
 msgid "This verification code link is not valid"
 msgstr "Недопустимая ссылка кода проверки"
 
-#: src/passwords_app/app/validation.py:104
+#: src/passwords_app/app/validation.py:108
 #, python-brace-format
 msgid "Passwords are limited to {n} character"
 msgid_plural "Passwords are limited to {n} characters"
@@ -1187,7 +1188,7 @@ msgstr[0] "Пароль — не более {n} символа"
 msgstr[1] "Пароль — не более {n} символов"
 msgstr[2] "Пароль — не более {n} символов"
 
-#: src/passwords_app/app/validation.py:107
+#: src/passwords_app/app/validation.py:111
 #, python-brace-format
 msgid "User names are limited to {n} character"
 msgid_plural "User names are limited to {n} characters"
@@ -1195,7 +1196,7 @@ msgstr[0] "Имя пользователя — не более {n} символ�
 msgstr[1] "Имя пользователя — не более {n} символов"
 msgstr[2] "Имя пользователя — не более {n} символов"
 
-#: src/passwords_app/app/validation.py:110
+#: src/passwords_app/app/validation.py:114
 #, python-brace-format
 msgid "Titles are limited to {n} character"
 msgid_plural "Titles are limited to {n} characters"
@@ -1203,7 +1204,7 @@ msgstr[0] "Название — не более {n} символа"
 msgstr[1] "Название — не более {n} символов"
 msgstr[2] "Название — не более {n} символов"
 
-#: src/passwords_app/app/validation.py:113
+#: src/passwords_app/app/validation.py:117
 #, python-brace-format
 msgid "Notes are limited to {n} character"
 msgid_plural "Notes are limited to {n} characters"
@@ -1211,14 +1212,18 @@ msgstr[0] "Заметки — не более {n} символа"
 msgstr[1] "Заметки — не более {n} символов"
 msgstr[2] "Заметки — не более {n} символов"
 
-#: src/passwords_app/app/validation.py:128
+#: src/passwords_app/app/validation.py:132
 #, python-brace-format
 msgid "“{url}” is not a valid web address"
 msgstr "«{url}» — недопустимый веб-адрес"
 
-#: src/passwords_app/app/validation.py:144
+#: src/passwords_app/app/validation.py:148
 msgid "Enter a password"
 msgstr "Введите пароль"
+
+#: src/passwords_app/app/validation.py:166
+msgid "Contains a character that cannot be saved"
+msgstr "Содержит символ, который нельзя сохранить"
 
 #: src/passwords_app/app/vault.py:285
 msgid "Could not check passwords against known data leaks"
