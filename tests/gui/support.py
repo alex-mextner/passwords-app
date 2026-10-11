@@ -17,7 +17,7 @@ import subprocess
 import sys
 import time
 import warnings
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, cast, override
 
@@ -333,6 +333,18 @@ class AppUnderTest:
             d._items_changed([item_id])
 
         self.call(remove)
+
+    def edit_remotely(self, item_id: str, **changes: str) -> None:
+        """As if the item was edited on an iPhone and synced, in the second of its last change.
+
+        iCloud stamps whole seconds, so the item's modified time does not move.
+        """
+
+        def edit(d: Any) -> None:
+            d.items[item_id] = replace(d.items[item_id], **changes)
+            d._items_changed([item_id])
+
+        self.call(edit)
 
     def wait_loaded(self) -> None:
         wait_until(lambda: self.vault.loaded, what="item list")
