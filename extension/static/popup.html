@@ -1,0 +1,28 @@
+<!doctype html>
+<!-- SPDX-FileCopyrightText: 2026 Alex Mextner -->
+<!-- SPDX-License-Identifier: MIT -->
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="color-scheme" content="light dark" />
+    <title>Passwords</title>
+    <link rel="stylesheet" href="popup.css" />
+  </head>
+  <body>
+    <header>
+      <img class="app-icon" src="icons/icon-32.png" alt="" width="28" height="28" />
+      <div class="heading">
+        <h1 id="title">Passwords</h1>
+        <p id="site"></p>
+      </div>
+    </header>
+    <div class="search-wrap">
+      <input id="search" type="search" autocomplete="off" spellcheck="false" />
+      <button id="clear" type="button" hidden></button>
+    </div>
+    <ul id="list" role="listbox" hidden></ul>
+    <p id="empty" hidden></p>
+    <footer><span id="status" data-tone="ok"></span></footer>
+    <script src="popup.js"></script>
+  </body>
+</html>

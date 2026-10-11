@@ -1,0 +1,27 @@
+<!doctype html>
+<!-- SPDX-FileCopyrightText: 2026 Alex Mextner -->
+<!-- SPDX-License-Identifier: MIT -->
+<html lang="en">
+<head><meta charset="utf-8"><title>Adatum</title></head>
+<body>
+<adatum-app>
+  <template shadowrootmode="open">
+    <header><span>Adatum</span></header>
+    <adatum-auth-card>
+      <template shadowrootmode="open">
+        <div class="card">
+          <h2>Sign in</h2>
+          <input id="nu" type="email" placeholder="Work email">
+          <adatum-password-field>
+            <template shadowrootmode="open">
+              <div class="wrap"><input id="np" type="password" placeholder="Password"></div>
+            </template>
+          </adatum-password-field>
+          <button>Sign in</button>
+        </div>
+      </template>
+    </adatum-auth-card>
+  </template>
+</adatum-app>
+</body>
+</html>

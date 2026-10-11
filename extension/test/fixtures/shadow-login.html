@@ -1,0 +1,22 @@
+<!doctype html>
+<!-- SPDX-FileCopyrightText: 2026 Alex Mextner -->
+<!-- SPDX-License-Identifier: MIT -->
+<html lang="en">
+<head><meta charset="utf-8"><title>Contoso</title></head>
+<body>
+<contoso-shell>
+  <contoso-login>
+    <template shadowrootmode="open">
+      <style>:host { display: block; }</style>
+      <form id="sf" action="/login">
+        <label for="su">Username</label>
+        <input id="su" name="username" autocomplete="username">
+        <label for="sp">Password</label>
+        <input id="sp" type="password" name="password" autocomplete="current-password">
+        <button type="submit">Log in</button>
+      </form>
+    </template>
+  </contoso-login>
+</contoso-shell>
+</body>
+</html>

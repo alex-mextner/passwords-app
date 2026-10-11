@@ -1,0 +1,45 @@
+{
+  "extName": { "message": "Passwords for Linux" },
+  "extDescription": {
+    "message": "Fill and save iCloud Keychain passwords and verification codes on Linux, through the Passwords app."
+  },
+  "actionTitle": { "message": "Passwords" },
+  "dropdownLabel": { "message": "Saved passwords" },
+  "noUsername": { "message": "No username" },
+  "useStrongPassword": { "message": "Use Strong Password" },
+  "strongPasswordHint": { "message": "Saved to Passwords when you submit" },
+  "verificationCode": { "message": "Verification Code" },
+  "codeFrom": {
+    "message": "From $TITLE$",
+    "placeholders": { "title": { "content": "$1" } }
+  },
+  "saveTitle": { "message": "Save this password?" },
+  "updateTitle": { "message": "Update the saved password?" },
+  "promptBody": { "message": "It will be kept in iCloud Keychain on all your devices." },
+  "save": { "message": "Save" },
+  "update": { "message": "Update" },
+  "notNow": { "message": "Not Now" },
+  "never": { "message": "Never for This Website" },
+  "searchPlaceholder": { "message": "Search" },
+  "clearSearch": { "message": "Clear search" },
+  "noMatches": { "message": "No saved passwords for this website" },
+  "noResults": { "message": "No results" },
+  "notAWebPage": { "message": "Open a website to see its passwords" },
+  "fill": { "message": "Fill" },
+  "fillCode": { "message": "Fill code" },
+  "secondsLeft": {
+    "message": "$SECONDS$ s",
+    "placeholders": { "seconds": { "content": "$1" } }
+  },
+  "hostUnavailable": { "message": "The Passwords app is not installed for this browser" },
+  "daemonUnavailable": { "message": "The Passwords service is not running" },
+  "stateIdle": { "message": "Synced with iCloud" },
+  "stateSyncing": { "message": "Syncing…" },
+  "statePaused": { "message": "Sync paused — open Passwords" },
+  "stateOffline": { "message": "Offline — changes sync later" },
+  "stateSignedOut": { "message": "Sign in to iCloud in the Passwords app" },
+  "stateSigninRequired": { "message": "Sign in again in the Passwords app" },
+  "stateError": { "message": "Sync problem — open Passwords" },
+  "locked": { "message": "Unlock the keyring to use your passwords" },
+  "genericError": { "message": "Something went wrong. Try again." }
+}

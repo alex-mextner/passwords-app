@@ -1,0 +1,9 @@
+{
+  "name": "io.github.alex_mextner.passwords",
+  "description": "Passwords for Linux: iCloud Keychain autofill",
+  "path": "@HOST_PATH@",
+  "type": "stdio",
+  "allowed_extensions": [
+    "passwords-app@alex-mextner.github.io"
+  ]
+}

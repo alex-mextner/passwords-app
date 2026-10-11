@@ -34,6 +34,7 @@ from passwords_app.daemon.status import (
     MSG_OFFLINE,
     MSG_SIGNED_OUT,
 )
+from passwords_app.sync.engine import UPLOAD_FAILURES_KEY
 from passwords_app.sync.plan import BaseEntry
 from passwords_app.sync.ports import (
     AuthRequired,
@@ -41,6 +42,7 @@ from passwords_app.sync.ports import (
     PendingDeletions,
     RejectedLocalItem,
 )
+from passwords_app.sync.remote_icloud import DUPLICATE_LOGIN
 
 if TYPE_CHECKING:
     from collections.abc import AsyncGenerator
@@ -698,6 +700,143 @@ async def test_many_rejected_items_are_summarized(
     _, summary, body = notifier.shown[0]
     assert summary.startswith("9 keyring items")
     assert "and 4 more" in body
+
+
+# ---------------------------------------------------------------- logins iCloud refuses
+
+
+def twin(password: str = "pw-A") -> Credential:
+    """A keyring login iCloud refuses (another login has its site and username, #71)."""
+    return make_credential(
+        "A", url="https://www.example.com/login", username="bob", password=password
+    )
+
+
+async def test_a_refused_login_leaves_the_status_idle_with_the_reason(
+    remote: MemoryRemote, local: MemoryLocal, daemon: Daemon
+) -> None:
+    remote.reject("A", DUPLICATE_LOGIN)
+    local.put(twin())
+    await daemon.sync_now()
+    status = daemon.status()
+    assert status.state == "idle"
+    assert status.message.startswith(
+        f"iCloud did not accept the password for bob on https://www.example.com/login: "
+        f"{DUPLICATE_LOGIN}."
+    )
+
+
+async def test_a_refused_login_is_announced_once_per_version(  # noqa: PLR0913, PLR0917 - fixtures
+    remote: MemoryRemote,
+    local: MemoryLocal,
+    clock: FakeClock,
+    daemon: Daemon,
+    notifier: FakeNotifier,
+    events: Events,
+) -> None:
+    remote.reject("A", DUPLICATE_LOGIN)
+    local.put(twin())
+    await daemon.sync_now()
+    body = (
+        "Another password for this website and username already exists. The password for bob "
+        "stays on this computer only; everything else keeps syncing. Edit or delete it to fix "
+        "this."
+    )
+    assert notifier.shown == [("refused:A", "Couldn't save “example.com” to iCloud", body)]
+    # Still waiting, then retried after the backoff and refused again: not news.
+    await daemon.sync_now()
+    await clock.advance(daemon.policy.rejected_retry.total_seconds() + 1)
+    await daemon.sync_now()
+    assert remote.calls.count(("upsert", "A")) >= 2
+    assert notifier.topics() == ["refused:A"]
+    # An edited version that iCloud refuses too is a new refusal.
+    local.put(twin(password="edited"))
+    await daemon.sync_now()
+    assert notifier.topics() == ["refused:A", "refused:A"]
+    assert notifier.closed == []
+    assert events.statuses[-1].message.startswith("iCloud did not accept")
+
+
+async def test_the_refusal_is_withdrawn_once_icloud_takes_the_login(
+    remote: MemoryRemote, local: MemoryLocal, daemon: Daemon, notifier: FakeNotifier
+) -> None:
+    remote.reject("A", DUPLICATE_LOGIN)
+    local.put(twin())
+    await daemon.sync_now()
+    remote.accept("A")
+    local.put(twin(password="fixed"))  # an edit retries at once
+    await daemon.sync_now()
+    assert "A" in remote.items
+    assert notifier.closed == ["refused:A"]
+    assert (daemon.status().state, daemon.status().message) == ("idle", "")
+
+
+async def test_the_refusal_is_withdrawn_once_the_login_is_deleted(
+    remote: MemoryRemote, local: MemoryLocal, daemon: Daemon, notifier: FakeNotifier
+) -> None:
+    remote.reject("A", DUPLICATE_LOGIN)
+    local.put(twin())
+    await daemon.sync_now()
+    await daemon.delete("A")
+    await daemon.sync_now()
+    assert notifier.closed == ["refused:A"]
+    assert daemon.status().message == ""
+
+
+async def test_an_outage_does_not_withdraw_a_refusal(
+    remote: MemoryRemote, local: MemoryLocal, daemon: Daemon, notifier: FakeNotifier
+) -> None:
+    # An interrupted cycle did not look at every login, so it cannot know the refusal is over.
+    remote.reject("A", DUPLICATE_LOGIN)
+    local.put(twin())
+    await daemon.sync_now()
+    remote.offline = True
+    await daemon.sync_now()
+    assert daemon.status().state == "offline"
+    assert notifier.closed == []
+    remote.offline = False
+    await daemon.sync_now()
+    assert notifier.topics() == ["refused:A"]
+    assert daemon.status().message.startswith("iCloud did not accept")
+
+
+async def test_signing_out_withdraws_refusals(
+    remote: MemoryRemote, local: MemoryLocal, daemon: Daemon, notifier: FakeNotifier
+) -> None:
+    remote.reject("A", DUPLICATE_LOGIN)
+    local.put(twin())
+    await daemon.sync_now()
+    await daemon.sign_out()
+    assert notifier.closed == ["refused:A"]
+
+
+async def test_a_refusal_from_a_crashed_cycle_is_announced_once(  # noqa: PLR0913, PLR0917 - fixtures
+    remote: MemoryRemote,
+    local: MemoryLocal,
+    state: StateStore,
+    daemon: Daemon,
+    notifier: FakeNotifier,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # The crash loses the cycle's refusal schedule, so the next cycle refuses afresh: that
+    # refusal is the one announced, not both.
+    remote.reject("A", DUPLICATE_LOGIN)
+    local.put(twin())
+    real_set = state.set
+
+    def crash_on_schedule(key: str, value: str) -> None:
+        if key == UPLOAD_FAILURES_KEY:
+            monkeypatch.setattr(state, "set", real_set)
+            msg = "bug while saving the schedule"
+            raise RuntimeError(msg)
+        real_set(key, value)
+
+    monkeypatch.setattr(state, "set", crash_on_schedule)
+    await daemon.sync_now()
+    assert daemon.status().message == MSG_CRASH
+    assert notifier.shown == []
+    await daemon.sync_now()
+    assert notifier.topics() == ["refused:A"]
 
 
 async def test_external_keyring_change_syncs_after_debounce(

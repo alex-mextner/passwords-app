@@ -1,0 +1,26 @@
+<!doctype html>
+<!-- SPDX-FileCopyrightText: 2026 Alex Mextner -->
+<!-- SPDX-License-Identifier: MIT -->
+<html lang="en">
+<head><meta charset="utf-8"><title>Two-factor authentication</title><link rel="stylesheet" href="/site.css"></head>
+<body>
+  <header><span class="logo"></span><span data-brand></span></header>
+  <main>
+    <h1>Enter your code</h1>
+    <p class="lead">Open your authenticator and enter the 6-digit code.</p>
+    <form method="post" action="/verify" id="verify">
+      <div class="otp">
+        <input id="d1" inputmode="numeric" maxlength="1" autocomplete="one-time-code" aria-label="Digit 1">
+        <input id="d2" inputmode="numeric" maxlength="1" aria-label="Digit 2">
+        <input id="d3" inputmode="numeric" maxlength="1" aria-label="Digit 3">
+        <span class="dash">–</span>
+        <input id="d4" inputmode="numeric" maxlength="1" aria-label="Digit 4">
+        <input id="d5" inputmode="numeric" maxlength="1" aria-label="Digit 5">
+        <input id="d6" inputmode="numeric" maxlength="1" aria-label="Digit 6">
+      </div>
+      <button type="submit" id="submit">Verify</button>
+    </form>
+  </main>
+  <script src="/site.js"></script>
+</body>
+</html>

@@ -1,0 +1,22 @@
+<!doctype html>
+<!-- SPDX-FileCopyrightText: 2026 Alex Mextner -->
+<!-- SPDX-License-Identifier: MIT -->
+<html lang="en">
+<head><meta charset="utf-8"><title>Sign in · Northwind</title></head>
+<body>
+<header class="site-header"><a href="/">Northwind</a><nav><a href="/pricing">Pricing</a> <a href="/docs">Docs</a></nav></header>
+<main>
+  <h1>Sign in to Northwind</h1>
+  <form id="login" action="/session" method="post">
+    <input type="hidden" id="token" name="authenticity_token" value="tok-example">
+    <label for="email">Email address</label>
+    <input type="email" id="email" name="user[email]" autocomplete="username" required>
+    <label for="password">Password <a href="/password/new">Forgot password?</a></label>
+    <input type="password" id="password" name="user[password]" autocomplete="current-password" required>
+    <label><input type="checkbox" id="remember" name="remember_me"> Keep me signed in</label>
+    <button type="submit">Sign in</button>
+  </form>
+  <p>New to Northwind? <a href="/signup">Create an account</a></p>
+</main>
+</body>
+</html>

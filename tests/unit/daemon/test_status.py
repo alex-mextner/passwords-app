@@ -18,7 +18,13 @@ from passwords_app.daemon.status import (
     paused_message,
 )
 from passwords_app.sync.engine import SKIP_AUTH, SKIP_LOCAL, SKIP_REMOTE
-from passwords_app.sync.ports import PendingDeletions, RejectedLocalItem, SyncReport
+from passwords_app.sync.ports import (
+    PendingDeletions,
+    RejectedLocalItem,
+    SyncReport,
+    UploadFailure,
+    upload_failures_message,
+)
 
 T0 = datetime(2026, 5, 1, tzinfo=UTC)
 
@@ -96,6 +102,33 @@ def test_a_clean_cycle_is_idle() -> None:
 def test_rejected_items_alone_do_not_change_the_state() -> None:
     rejected = (RejectedLocalItem("/x", "label", "why"),)
     assert outcome(report(rejected=rejected)) == ("idle", "")
+
+
+def refused(item_id: str = "A") -> UploadFailure:
+    return UploadFailure(item_id, "https://example.com", "bob", "why", 1, T0)
+
+
+def test_logins_icloud_refused_stay_idle_and_explain_why() -> None:
+    # Only those logins wait; the rest synced, so this is not an outage (#82).
+    failures = (refused("A"), refused("B"))
+    assert outcome(report(upload_failures=failures)) == (
+        "idle",
+        upload_failures_message(failures),
+    )
+
+
+def test_a_pause_wins_over_refused_logins() -> None:
+    # The pause needs a decision; the refusal is shown again by the next cycle.
+    pending = PendingDeletions(("A",), ())
+    state, _ = outcome(report(paused=pending, upload_failures=(refused(),)))
+    assert state == "paused"
+
+
+def test_an_outage_wins_over_refused_logins() -> None:
+    assert outcome(report(skipped_reason=SKIP_REMOTE, upload_failures=(refused(),))) == (
+        "offline",
+        MSG_OFFLINE,
+    )
 
 
 def test_a_paused_cycle_is_paused() -> None:

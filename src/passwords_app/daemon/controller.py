@@ -58,7 +58,7 @@ from passwords_app.sync.ports import (
 )
 
 if TYPE_CHECKING:
-    from collections.abc import AsyncIterator, Callable, Mapping
+    from collections.abc import AsyncIterator, Callable, Mapping, Sequence
 
     from passwords_app.core.model import TrashReason
     from passwords_app.daemon.account import AccountInfo, AccountPort, RecoveryDevice
@@ -73,11 +73,14 @@ if TYPE_CHECKING:
         RemoteStore,
         SyncReport,
         SyncState,
+        UploadFailure,
     )
 
 ACCOUNT_KEY = "apple-id"
 WATCH_RETRY_SECONDS = 30.0
 MAX_LISTED_REJECTS = 5
+# Notification topic prefix for a login iCloud refused; one notification per login.
+REFUSED_TOPIC = "refused:"
 # Reads retried when the keyring's lock state changes while they are in flight.
 FETCH_ATTEMPTS = 3
 _CODE = re.compile(r"[0-9]{6}")
@@ -100,6 +103,20 @@ def new_item_id() -> str:
 
 def _sort_key(c: Credential) -> tuple[str, str, str]:
     return ((c.title or link_host(c.url) or c.url).casefold(), c.username.casefold(), c.id)
+
+
+def _refusal_notice(failure: UploadFailure) -> tuple[str, str]:
+    """Return the notification summary and body for a login iCloud refused to store."""
+    reason = failure.reason.rstrip(".")
+    if reason[1:2].islower():  # leave "iCloud …" as is
+        reason = reason[:1].upper() + reason[1:]
+    who = f"The password for {failure.username}" if failure.username else "This password"
+    summary = f"Couldn't save “{link_host(failure.url) or failure.url}” to iCloud"
+    body = (
+        f"{reason}. {who} stays on this computer only; everything else keeps syncing. "
+        "Edit or delete it to fix this."
+    )
+    return summary, body
 
 
 @dataclass(frozen=True, slots=True)
@@ -262,7 +279,12 @@ class Daemon:
         self._notifier = notifier
         self._policy = policy or SyncPolicy()
         self._engine = SyncEngine(
-            self._remote, self._local, state, policy=self._policy, clock=clock.now
+            self._remote,
+            self._local,
+            state,
+            policy=self._policy,
+            clock=clock.now,
+            on_upload_rejected=self._upload_refused,
         )
         self.scheduler = Scheduler(self._cycle, clock)
         self._lock = asyncio.Lock()
@@ -275,6 +297,8 @@ class Daemon:
         self._awaiting_code: str | None = None
         self._devices: set[str] = set()
         self._rejected_seen: frozenset[str] = frozenset()
+        # Logins iCloud refused during the engine call in progress; announced after it.
+        self._refused: dict[str, UploadFailure] = {}
         self._alerts: set[str] = set()
         self._tasks: list[asyncio.Task[None]] = []
         # The keyring content the last cycle left behind (see echo.py), and the pending
@@ -480,6 +504,8 @@ class Daemon:
         async with self._lock:
             self._set("syncing", "")
             journal = self._local.begin_journal()
+            # A crashed call saved no refusal, so the next one reports the same ones again.
+            self._refused.clear()
             try:
                 report = await self._engine.run_once()
             except Exception:  # noqa: BLE001 - a daemon must outlive any bug in one cycle
@@ -491,10 +517,19 @@ class Daemon:
                 self._local.end_journal()
             after = await self._refresh()
             self._echo = settled(journal, after, self._clock.monotonic())
-        await self._after(report)
+            refused = self._take_refused()
+        await self._after(report, refused)
         return report.skipped_reason is None
 
-    async def _after(self, report: SyncReport) -> None:
+    def _upload_refused(self, failure: UploadFailure) -> None:
+        self._refused[failure.item_id] = failure
+
+    def _take_refused(self) -> list[UploadFailure]:
+        """Return this engine call's refusals; taken under the lock, before another call runs."""
+        refused, self._refused = list(self._refused.values()), {}
+        return refused
+
+    async def _after(self, report: SyncReport, refused: Sequence[UploadFailure]) -> None:
         state, message = outcome(report)
         self._set(state, message)
         if state == "paused":
@@ -506,6 +541,20 @@ class Daemon:
         else:
             await self._withdraw("signin")
         await self._report_rejected(report)
+        await self._report_refused(report, refused)
+
+    async def _report_refused(self, report: SyncReport, refused: Sequence[UploadFailure]) -> None:
+        """One notification per refused version; withdrawn once iCloud no longer refuses it."""
+        for failure in refused:
+            topic = REFUSED_TOPIC + failure.item_id
+            self._alerts.add(topic)
+            await self._notifier.notify(topic, *_refusal_notice(failure))
+        if report.skipped_reason is not None:
+            return  # an interrupted cycle did not look at every login
+        waiting = {REFUSED_TOPIC + f.item_id for f in report.upload_failures}
+        for topic in sorted(self._alerts):
+            if topic.startswith(REFUSED_TOPIC) and topic not in waiting:
+                await self._withdraw(topic)
 
     async def _report_rejected(self, report: SyncReport) -> None:
         refs = frozenset(r.ref for r in report.rejected)
@@ -737,13 +786,15 @@ class Daemon:
     async def resolve_pause(self, *, apply: bool) -> None:
         self._require_account()
         async with self._lock:
+            self._refused.clear()
             try:
                 report = await self._engine.resolve_pause(apply=apply)
             except NoPendingDeletionsError:
                 msg = "Nothing is waiting for a decision."
                 raise InvalidError(msg) from None
             await self._refresh()
-        await self._after(report)
+            refused = self._take_refused()
+        await self._after(report, refused)
 
     # ------------------------------------------------------------------ browser helpers
 

@@ -113,9 +113,12 @@ Guards (never bypassed silently):
   a conflict error aborts that action and the next cycle re-plans with fresh data.
 - A login iCloud refuses to store (another login has its site and username, or the address
   is not a website) only sets **that item** aside: the rest of the cycle continues, status is
-  not `offline`, the status message names the login, a notification fires once per refused
-  version, and the item is retried with its own backoff (2 min doubling to 6 h; at once
-  after an edit).
+  `idle` (not `offline`) and the status message names the login, a notification fires once per
+  refused version saying the password stays on this computer only, and it is withdrawn once a
+  complete cycle no longer finds the login refused (accepted after an edit, or deleted). The
+  item is retried with its own backoff (2 min doubling to 6 h; at once after an edit). The
+  item dicts carry no per-item flag for this: the D-Bus contract only exposes it through the
+  status message and the notification.
 
 Trash: every item removed from either side, and every conflict loser, is stored encrypted in
 state.db with `deleted_at`, `reason`, and origin for **90 days** (setting, default 90), then

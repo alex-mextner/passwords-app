@@ -29,7 +29,7 @@ from passwords_app.sync.ports import (
     RemoteStore,
     RemoteUnavailable,
 )
-from passwords_app.sync.remote_icloud import ICloudRemoteStore
+from passwords_app.sync.remote_icloud import DUPLICATE_LOGIN, ICloudRemoteStore
 
 if TYPE_CHECKING:
     from collections.abc import Callable, Mapping
@@ -185,11 +185,26 @@ async def test_errors_map_to_engine_errors(error: Exception, expected: type[Exce
             await call
 
 
-@pytest.mark.parametrize("error", [UnsupportedCredentialError("ftp"), DuplicateLoginError("dup")])
-async def test_a_login_icloud_cannot_store_is_rejected_alone(error: Exception) -> None:
-    store = ICloudRemoteStore(lambda: _Raising(error))
-    with pytest.raises(ItemRejected, match="cannot store this login"):
+async def test_a_login_icloud_cannot_store_is_rejected_alone() -> None:
+    store = ICloudRemoteStore(lambda: _Raising(UnsupportedCredentialError("ftp")))
+    with pytest.raises(ItemRejected, match="cannot store this login: ftp"):
         await store.upsert(CRED, None)
+    # Reading or deleting cannot be "this login" being refused: those stay outages.
+    for call in (store.fetch(), store.delete(CRED.id, None)):
+        with pytest.raises(RemoteUnavailable):
+            await call
+
+
+async def test_a_duplicate_login_is_refused_in_words_a_person_understands() -> None:
+    # The reason is shown as is in the daemon's status and notification (#82, #71), which
+    # name the site and username themselves.
+    store = ICloudRemoteStore(lambda: _Raising(DuplicateLoginError("another login for 'x'")))
+    with pytest.raises(ItemRejected) as refused:
+        await store.upsert(CRED, None)
+    assert str(refused.value) == DUPLICATE_LOGIN
+    for call in (store.fetch(), store.delete(CRED.id, None)):
+        with pytest.raises(RemoteUnavailable):
+            await call
     # Reading or deleting cannot be "this login" being refused: those stay outages.
     for call in (store.fetch(), store.delete(CRED.id, None)):
         with pytest.raises(RemoteUnavailable):
