@@ -39,7 +39,7 @@ async function buildTarget(target: Target): Promise<void> {
     filter: (source) => !source.endsWith(".svg"),
   });
   await writeFile(join(out, "manifest.json"), `${JSON.stringify(manifestFor(target), null, 2)}\n`);
-  console.log(`built ${out}`);
+  process.stdout.write(`built ${out}\n`);
 }
 
 const requested = process.argv

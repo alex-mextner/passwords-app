@@ -13,6 +13,10 @@
   <script src="/site.js"></script>
   <script>
     // The test passes the frame's URL in the query: ?src=https://other.example:port/login.html
+    // This page exists only on the e2e suite's local test server: embedding a test-chosen
+    // cross-site frame is its purpose, so the query-driven src is intended.
+    // codeql[js/xss]
+    // codeql[js/client-side-unvalidated-url-redirection]
     document.getElementById("frame").src = new URLSearchParams(location.search).get("src") || "about:blank";
   </script>
 </body>
