@@ -12,6 +12,7 @@ from tests.fakes.memory_stores import MemoryLocal, MemoryRemote, make_credential
 from passwords_app.sync.ports import (
     AuthRequired,
     ConflictError,
+    ItemRejected,
     LocalUnavailable,
     RemoteUnavailable,
 )
@@ -132,6 +133,18 @@ async def test_remote_on_write_runs_before_the_etag_check() -> None:
     with pytest.raises(ConflictError):
         await remote.upsert(make_credential("A", title="mine"), etag)
     assert remote.items["A"].credential.title == "raced"
+
+
+async def test_remote_rejects_one_item_until_it_is_accepted() -> None:
+    remote = MemoryRemote()
+    remote.reject("A", "duplicate login")
+    with pytest.raises(ItemRejected, match="duplicate login"):
+        await remote.upsert(make_credential("A"), None)
+    await remote.upsert(make_credential("B"), None)
+    assert set(remote.items) == {"B"}
+    remote.accept("A")
+    await remote.upsert(make_credential("A"), None)
+    assert set(remote.items) == {"A", "B"}
 
 
 # ---------------------------------------------------------------- MemoryLocal

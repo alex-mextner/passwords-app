@@ -24,11 +24,14 @@ from passwords_app.sync.plan import content_key
 from passwords_app.sync.ports import (
     AuthRequired,
     ConflictError,
+    ItemRejected,
     LocalUnavailable,
     PendingDeletions,
     RejectedLocalItem,
     RemoteUnavailable,
     SyncPolicy,
+    UploadFailure,
+    upload_failures_message,
 )
 
 if TYPE_CHECKING:
@@ -563,6 +566,207 @@ async def test_skipped_cycle_does_not_record_last_sync(w: World) -> None:
     w.local.lock()
     await w.engine.run_once()
     assert w.state.get(LAST_SYNC_KEY) is None
+
+
+# ---------------------------------------------------------------- items iCloud refuses
+
+
+async def test_an_item_icloud_refuses_does_not_stop_the_others(w: World) -> None:
+    for item_id in ("A", "B", "C"):
+        w.local.put(make_credential(item_id))
+    w.remote.reject("B", "another login for this site and account already exists")
+    report = await w.engine.run_once()
+    assert report.skipped_reason is None
+    assert report.created_remote == 2
+    assert set(w.remote.items) == {"A", "C"}
+    assert w.state.get(LAST_SYNC_KEY) == T0.isoformat()
+    (failure,) = report.upload_failures
+    assert failure == UploadFailure(
+        "B",
+        "https://b.example.com",
+        "user",
+        "another login for this site and account already exists",
+        attempts=1,
+        retry_at=T0 + SyncPolicy().rejected_retry,
+    )
+    assert "B" not in w.state.bases()
+
+
+async def test_a_refused_item_does_not_stop_later_changes(w: World) -> None:
+    w.local.put(make_credential("B"))
+    w.remote.reject("B")
+    await w.engine.run_once()
+    w.local.put(make_credential("LATER"))
+    report = await w.engine.run_once()
+    assert report.skipped_reason is None
+    assert "LATER" in w.remote.items
+
+
+async def test_a_refused_item_is_retried_with_growing_backoff(w: World) -> None:
+    w.local.put(make_credential("B"))
+    w.remote.reject("B")
+    retry = SyncPolicy().rejected_retry
+
+    async def uploads_of_b() -> int:
+        w.remote.calls.clear()
+        report = await w.engine.run_once()
+        assert report.skipped_reason is None
+        assert [f.item_id for f in report.upload_failures] == ["B"]
+        return w.remote.calls.count(("upsert", "B"))
+
+    assert await uploads_of_b() == 1
+    w.clock.advance(seconds=retry.total_seconds() - 1)
+    assert await uploads_of_b() == 0  # still waiting: no hammering every cycle
+    w.clock.advance(seconds=1)
+    assert await uploads_of_b() == 1  # second refusal: the wait doubles
+    w.clock.advance(seconds=retry.total_seconds())
+    assert await uploads_of_b() == 0
+    w.clock.advance(seconds=retry.total_seconds())
+    assert await uploads_of_b() == 1
+    w.remote.accept("B")
+    w.clock.advance(seconds=4 * retry.total_seconds())
+    report = await w.engine.run_once()
+    assert report.created_remote == 1
+    assert report.upload_failures == ()
+    assert w.converged()
+
+
+async def test_backoff_is_capped(w: World) -> None:
+    policy = SyncPolicy(
+        rejected_retry=timedelta(minutes=1), rejected_retry_max=timedelta(minutes=3)
+    )
+    w.engine = w.make_engine(policy)
+    w.local.put(make_credential("B"))
+    w.remote.reject("B")
+    waits = []
+    for _ in range(4):
+        report = await w.engine.run_once()
+        (failure,) = report.upload_failures
+        waits.append(failure.retry_at - w.clock.now)
+        w.clock.now = failure.retry_at
+    assert waits == [timedelta(minutes=m) for m in (1, 2, 3, 3)]
+
+
+async def test_editing_a_refused_item_retries_it_at_once(w: World) -> None:
+    b = make_credential("B")
+    w.local.put(b)
+    w.remote.reject("B")
+    await w.engine.run_once()
+    w.remote.accept("B")
+    w.local.put(at(b, 1, username="someone-else"))
+    report = await w.engine.run_once()
+    assert report.created_remote == 1
+    assert report.upload_failures == ()
+    assert w.remote.items["B"].credential.username == "someone-else"
+
+
+async def test_a_refused_edit_keeps_the_item_linked_and_others_flowing(w: World) -> None:
+    a, b = make_credential("A"), make_credential("B")
+    await synced(w, a, b)
+    w.local.put(at(a, 1, password="fake-a"))
+    w.local.put(at(b, 1, password="fake-b"))
+    w.remote.reject("A")
+    report = await w.engine.run_once()
+    assert report.skipped_reason is None
+    assert report.updated_remote == 1
+    assert w.remote.items["B"].credential.password == "fake-b"
+    assert w.state.bases()["A"].credential == a
+    assert [f.item_id for f in report.upload_failures] == ["A"]
+
+
+async def test_the_retry_schedule_survives_a_restart(w: World) -> None:
+    w.local.put(make_credential("B"))
+    w.remote.reject("B")
+    first = await w.engine.run_once()
+    w.restart()
+    w.remote.calls.clear()
+    report = await w.engine.run_once()
+    assert ("upsert", "B") not in w.remote.calls
+    assert report.upload_failures == first.upload_failures
+
+
+async def test_a_refused_item_that_was_deleted_is_forgotten(w: World) -> None:
+    w.local.put(make_credential("B"))
+    w.remote.reject("B")
+    await w.engine.run_once()
+    w.local.remove("B")
+    report = await w.engine.run_once()
+    assert report.upload_failures == ()
+    w.local.put(make_credential("B"))
+    w.remote.calls.clear()
+    await w.engine.run_once()
+    assert ("upsert", "B") in w.remote.calls  # a fresh start, not the old schedule
+
+
+async def test_the_rejection_hook_fires_once_per_refused_version(w: World) -> None:
+    seen: list[UploadFailure] = []
+    w.engine = SyncEngine(w.remote, w.local, w.state, clock=w.clock, on_upload_rejected=seen.append)
+    b = make_credential("B")
+    w.local.put(b)
+    w.remote.reject("B", "duplicate")
+    await w.engine.run_once()
+    w.clock.advance(days=1)
+    await w.engine.run_once()  # refused again: the user already knows
+    assert [(f.item_id, f.attempts) for f in seen] == [("B", 1)]
+    w.local.put(at(b, 1, password="fake-new"))
+    await w.engine.run_once()  # a new version refused: tell the user again
+    assert [(f.item_id, f.attempts) for f in seen] == [("B", 1), ("B", 1)]
+
+
+async def test_item_rejection_from_a_write_does_not_lose_the_trash_copy(w: World) -> None:
+    a = make_credential("A")
+    await synced(w, a)
+    iphone = at(a, 1, password="fake-iphone")
+    linux = at(a, 2, password="fake-linux")
+    w.remote.put(iphone)
+    w.local.put(linux)
+    w.remote.reject("A")
+    report = await w.engine.run_once()
+    assert report.skipped_reason is None
+    assert [e.credential for e in w.engine.trash()] == [iphone]
+    assert w.local.items["A"] == linux
+
+
+def test_upload_failure_message_names_the_login_and_the_way_out() -> None:
+    one = UploadFailure("B", "https://b.example", "alice", "duplicate", 1, T0)
+    assert upload_failures_message(()) == ""
+    message = upload_failures_message((one,))
+    assert "alice on https://b.example" in message
+    assert "duplicate" in message
+    assert "Everything else is syncing" in message
+    two = upload_failures_message((one, dataclasses.replace(one, item_id="C")))
+    assert two.startswith("iCloud did not accept 2 passwords")
+
+
+async def test_a_refused_restore_of_a_held_deletion_is_kept_and_retried(w: World) -> None:
+    items = [make_credential(f"I{i}") for i in range(6)]
+    await synced(w, *items)
+    for c in items:
+        w.remote.remove(c.id)
+    assert (await w.engine.run_once()).paused is not None
+    w.remote.reject("I0")
+    report = await w.engine.resolve_pause(apply=False)
+    assert report.created_remote == 5
+    assert [f.item_id for f in report.upload_failures] == ["I0"]
+    w.restart()
+    report = await w.engine.run_once()
+    # The user chose to keep it: a refused upload must not turn into a local deletion.
+    assert report.deleted_local == 0
+    assert "I0" in w.local.items
+    assert w.engine.trash() == []
+    w.remote.accept("I0")
+    w.clock.advance(seconds=SyncPolicy().rejected_retry.total_seconds())
+    report = await w.engine.run_once()
+    assert report.created_remote == 1
+    assert w.converged()
+
+
+async def test_item_rejected_is_not_an_outage(w: World) -> None:
+    w.local.put(make_credential("A"))
+    w.remote.fail_next("upsert", ItemRejected("bad url"))
+    report = await w.engine.run_once()
+    assert report.skipped_reason is None
+    assert not isinstance(ItemRejected("x"), RemoteUnavailable)
 
 
 # ---------------------------------------------------------------- S20 restart

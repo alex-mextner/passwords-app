@@ -12,6 +12,8 @@ API summary (keep it small; daemon, app, browser, and e2e suites depend on it):
   "delete") raise `exc` (e.g. `ConflictError()`, `AuthRequired()`).
 - `on_write`: optional async hook run inside `upsert`/`delete` before the etag check, to
   model a concurrent device edit racing the engine.
+- `reject(id, reason)` / `accept(id)`: every `upsert` of that item raises `ItemRejected`
+  (iCloud refusing one login, e.g. a duplicate site and account) until it is accepted.
 - `calls`: list of `(op, item_id | None)` in call order.
 
 `MemoryLocal` (GNOME Keyring collection stand-in)
@@ -39,6 +41,7 @@ from typing import TYPE_CHECKING, Any, Literal
 from passwords_app.core.model import Credential
 from passwords_app.sync.ports import (
     ConflictError,
+    ItemRejected,
     LocalSnapshot,
     LocalUnavailable,
     RejectedLocalItem,
@@ -91,6 +94,7 @@ class MemoryRemote:
         self.offline = False
         self.on_write: Callable[[str], Awaitable[None]] | None = None
         self.calls: list[tuple[Op, str | None]] = []
+        self._rejected: dict[str, str] = {}
         for c in (items or {}).values():
             self.put(c)
 
@@ -116,6 +120,12 @@ class MemoryRemote:
     def fail_next(self, op: Op, exc: Exception, times: int = 1) -> None:
         self._faults.add(op, exc, times)
 
+    def reject(self, item_id: str, reason: str = "iCloud refused this login (simulated)") -> None:
+        self._rejected[item_id] = reason
+
+    def accept(self, item_id: str) -> None:
+        self._rejected.pop(item_id, None)
+
     def _enter(self, op: Op, item_id: str | None) -> None:
         self.calls.append((op, item_id))
         if self.offline:
@@ -129,6 +139,8 @@ class MemoryRemote:
 
     async def upsert(self, credential: Credential, etag: str | None) -> str:
         self._enter("upsert", credential.id)
+        if credential.id in self._rejected:
+            raise ItemRejected(self._rejected[credential.id])
         if self.on_write is not None:
             await self.on_write(credential.id)
         current = self._items.get(credential.id)

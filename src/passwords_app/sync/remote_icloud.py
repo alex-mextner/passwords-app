@@ -25,6 +25,7 @@ from passwords_app.icloud.transport.cloudkit import CloudKitError
 from passwords_app.sync.ports import (
     AuthRequired,
     ConflictError,
+    ItemRejected,
     RemoteItem,
     RemoteSnapshot,
     RemoteUnavailable,
@@ -64,7 +65,7 @@ class ICloudRemoteStore:
         self._opened_for: object = None
         self._lock = threading.Lock()
 
-    def _call[T](self, op: Callable[[Keychain], T]) -> T:
+    def _call[T](self, op: Callable[[Keychain], T], *, saving: bool = False) -> T:
         with self._lock:
             for attempt in range(2):
                 try:
@@ -76,14 +77,14 @@ class ICloudRemoteStore:
                     return op(self._keychain)
                 except CloudKitError as e:
                     if not e.unauthorized:
-                        raise _translate(e) from e
+                        raise _translate(e, saving=saving) from e
                     self._keychain = None
                     if attempt:
                         msg = "iCloud keeps rejecting the sign-in; sign in again"
                         raise AuthRequired(msg) from e
                     logger.info("iCloud rejected the session; reconnecting")
                 except (AppleError, requests.RequestException, OSError, ValueError) as e:
-                    raise _translate(e) from e
+                    raise _translate(e, saving=saving) from e
         msg = "unreachable"  # pragma: no cover - the loop always returns or raises
         raise AssertionError(msg)  # pragma: no cover
 
@@ -94,17 +95,21 @@ class ICloudRemoteStore:
         )
 
     async def upsert(self, credential: Credential, etag: str | None) -> str:
-        return await asyncio.to_thread(self._call, lambda k: k.save(credential, etag))
+        return await asyncio.to_thread(self._call, lambda k: k.save(credential, etag), saving=True)
 
     async def delete(self, item_id: str, etag: str | None) -> None:
         await asyncio.to_thread(self._call, lambda k: k.delete(item_id, etag))
 
 
-def _translate(error: Exception) -> Exception:
+def _translate(error: Exception, *, saving: bool) -> Exception:
     if isinstance(error, RecordConflictError):
         return ConflictError(str(error))
     if isinstance(error, SignInRequired):
         return AuthRequired(str(error))
     if isinstance(error, UnsupportedCredentialError):
-        return RemoteUnavailable(f"iCloud Keychain cannot store this login: {error}")
+        msg = f"iCloud Keychain cannot store this login: {error}"
+        # Only a save can be refused for the login itself (a non-web address, another login
+        # with the same site and account): that is this item's problem, not an outage, so the
+        # engine sets it aside and keeps syncing the rest.
+        return ItemRejected(msg) if saving else RemoteUnavailable(msg)
     return RemoteUnavailable(str(error) or type(error).__name__)

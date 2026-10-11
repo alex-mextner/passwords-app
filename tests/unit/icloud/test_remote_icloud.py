@@ -19,11 +19,12 @@ from passwords_app.icloud.keychain.client import (
     StoredLogin,
     UnreadableZoneError,
 )
-from passwords_app.icloud.passwords import UnsupportedCredentialError
+from passwords_app.icloud.passwords import DuplicateLoginError, UnsupportedCredentialError
 from passwords_app.icloud.transport.cloudkit import CloudKitError
 from passwords_app.sync.ports import (
     AuthRequired,
     ConflictError,
+    ItemRejected,
     RemoteSnapshot,
     RemoteStore,
     RemoteUnavailable,
@@ -173,7 +174,6 @@ class _Raising:
         (SignInRequired("x"), AuthRequired),
         (UnreadableZoneError("x"), RemoteUnavailable),
         (CloudKitError("x", http_status=500), RemoteUnavailable),
-        (UnsupportedCredentialError("x"), RemoteUnavailable),
         (requests.ConnectionError("x"), RemoteUnavailable),
         (OSError("disk"), RemoteUnavailable),
     ],
@@ -183,6 +183,29 @@ async def test_errors_map_to_engine_errors(error: Exception, expected: type[Exce
     for call in (store.fetch(), store.upsert(CRED, None), store.delete(CRED.id, None)):
         with pytest.raises(expected):
             await call
+
+
+@pytest.mark.parametrize("error", [UnsupportedCredentialError("ftp"), DuplicateLoginError("dup")])
+async def test_a_login_icloud_cannot_store_is_rejected_alone(error: Exception) -> None:
+    store = ICloudRemoteStore(lambda: _Raising(error))
+    with pytest.raises(ItemRejected, match="cannot store this login"):
+        await store.upsert(CRED, None)
+    # Reading or deleting cannot be "this login" being refused: those stay outages.
+    for call in (store.fetch(), store.delete(CRED.id, None)):
+        with pytest.raises(RemoteUnavailable):
+            await call
+
+
+async def test_a_duplicate_site_and_account_is_rejected_and_the_store_keeps_working(
+    fake: FakeCloudKit, store: ICloudRemoteStore
+) -> None:
+    fake.put_login(CRED)
+    twin = dataclasses.replace(CRED, id="00000000-0000-4000-8000-000000000002", password="q")
+    with pytest.raises(ItemRejected, match="already exists"):
+        await store.upsert(twin, None)
+    other = dataclasses.replace(twin, url="https://b.example")
+    await store.upsert(other, None)
+    assert set((await store.fetch()).items) == {CRED.id, other.id}
 
 
 async def test_sign_in_required_while_connecting_is_auth_required() -> None:
