@@ -72,22 +72,17 @@ def display_name(item: Plain) -> str:
     return str(item.get("title") or host(str(item.get("url", ""))))
 
 
-def status_text(status: Plain, now: datetime) -> str:
-    state = str(status["state"])
-    lines = [f"Passwords:  {STATE_LABELS.get(state, state)}"]
-    if status.get("apple_id"):
-        lines.append(f"Account:    {status['apple_id']}")
-    trash = int(status.get("trash_count", 0))
-    items = f"Items:      {status.get('item_count', 0)}"
-    if trash:
-        items += f" ({trash} recently deleted)"
-    lines.append(items)
-    if state != "signed-out":
-        lines.append(f"Last sync:  {relative(int(status.get('last_sync', 0)), now)}")
-        if int(status.get("next_sync", 0)):
-            lines.append(f"Next sync:  {relative(int(status['next_sync']), now)}")
-    if status.get("message"):
-        lines.extend(("", str(status["message"])))
+def _sync_lines(state: str, status: Plain, now: datetime) -> list[str]:
+    if state == "signed-out":
+        return []
+    lines = [f"Last sync:  {relative(int(status.get('last_sync', 0)), now)}"]
+    if int(status.get("next_sync", 0)):
+        lines.append(f"Next sync:  {relative(int(status['next_sync']), now)}")
+    return lines
+
+
+def _next_step(state: str, status: Plain) -> tuple[str, ...]:
+    """Tell the user what to do next: resolve held-back deletions, or sign in."""
     local = list(status.get("pending_local_deletions", []))
     remote = list(status.get("pending_remote_deletions", []))
     if local or remote:
@@ -99,11 +94,28 @@ def status_text(status: Plain, now: datetime) -> str:
             "Run `passwords-app resolve apply` to delete them, "
             "or `passwords-app resolve restore` to bring them back."
         )
-        lines.extend(("", held, choice))
-    elif state == "signed-out":
-        lines.extend(("", "Run `passwords-app signin` to connect your iCloud Keychain."))
-    elif state == "signin-required":
-        lines.extend(("", "Run `passwords-app signin` to sign in again."))
+        return ("", held, choice)
+    if state == "signed-out":
+        return ("", "Run `passwords-app signin` to connect your iCloud Keychain.")
+    if state == "signin-required":
+        return ("", "Run `passwords-app signin` to sign in again.")
+    return ()
+
+
+def status_text(status: Plain, now: datetime) -> str:
+    state = str(status["state"])
+    lines = [f"Passwords:  {STATE_LABELS.get(state, state)}"]
+    if status.get("apple_id"):
+        lines.append(f"Account:    {status['apple_id']}")
+    trash = int(status.get("trash_count", 0))
+    items = f"Items:      {status.get('item_count', 0)}"
+    if trash:
+        items += f" ({trash} recently deleted)"
+    lines.append(items)
+    lines.extend(_sync_lines(state, status, now))
+    if status.get("message"):
+        lines.extend(("", str(status["message"])))
+    lines.extend(_next_step(state, status))
     return "\n".join(lines)
 
 
@@ -147,6 +159,20 @@ def items_table(items: Sequence[Plain]) -> str:
     return _table(("NAME", "USERNAME", "WEBSITE", "2FA", "ID"), rows)
 
 
+def _detail_extras(item: Plain) -> list[str]:
+    lines: list[str] = []
+    alt = list(item.get("alt_urls", []))
+    if alt:
+        lines.append(f"  Also used on: {', '.join(alt)}")
+    if item.get("group"):
+        lines.append(f"  Shared group: {item['group']}")
+    if item.get("notes"):
+        notes = str(item["notes"]).splitlines() or [""]
+        lines.append(f"  Notes:     {notes[0]}")
+        lines.extend(f"             {n}" for n in notes[1:])
+    return lines
+
+
 def item_detail(item: Plain, *, reveal: bool, code: tuple[str, int] | None, now: datetime) -> str:
     password = str(item.get("password", "")) if reveal else MASK
     lines = [
@@ -157,15 +183,7 @@ def item_detail(item: Plain, *, reveal: bool, code: tuple[str, int] | None, now:
     ]
     if code is not None:
         lines.append(f"  Code:      {code[0]} ({code[1]} s left)")
-    alt = list(item.get("alt_urls", []))
-    if alt:
-        lines.append(f"  Also used on: {', '.join(alt)}")
-    if item.get("group"):
-        lines.append(f"  Shared group: {item['group']}")
-    if item.get("notes"):
-        notes = str(item["notes"]).splitlines() or [""]
-        lines.append(f"  Notes:     {notes[0]}")
-        lines.extend(f"             {n}" for n in notes[1:])
+    lines.extend(_detail_extras(item))
     lines.append(f"  Modified:  {relative(int(item.get('modified', 0)), now)}")
     lines.append(f"  ID:        {item['id']}")
     return "\n".join(lines)

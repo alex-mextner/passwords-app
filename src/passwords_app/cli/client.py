@@ -18,7 +18,6 @@ from passwords_app.daemon import BUS_NAME, INTERFACE, OBJECT_PATH
 
 if TYPE_CHECKING:
     from collections.abc import Iterable
-    from types import TracebackType
 
 type Plain = dict[str, Any]
 
@@ -74,12 +73,7 @@ class DaemonClient:
     async def __aenter__(self) -> Self:
         return self
 
-    async def __aexit__(
-        self,
-        exc_type: type[BaseException] | None,
-        exc: BaseException | None,
-        tb: TracebackType | None,
-    ) -> None:
+    async def __aexit__(self, *_: object) -> None:
         self._bus.disconnect()
 
     async def call(self, member: str, signature: str = "", *body: Any) -> list[Any]:  # noqa: ANN401
