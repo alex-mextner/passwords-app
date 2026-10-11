@@ -7,8 +7,7 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
-import pytest
-from tests.e2e.stack import SurfaceTimeoutError, stays, wait_until
+from tests.e2e.stack import stays, wait_until
 
 if TYPE_CHECKING:
     from tests.e2e.stack import Stack
@@ -40,12 +39,6 @@ def test_s15_trash_is_kept_89_days_and_purged_after_90(stack: Stack) -> None:
     assert all(stack.keyring_matches(c) for c in others)
 
 
-# The purge itself is covered above; only the open app's view of it is expected to fail.
-@pytest.mark.xfail(
-    strict=True,
-    raises=SurfaceTimeoutError,
-    reason="#69: the open app's Deleted view keeps entries purged by retention",
-)
 def test_s15_the_open_app_drops_purged_entries(stack: Stack) -> None:
     deleted = _delete_in_app(stack)
     app = stack.app

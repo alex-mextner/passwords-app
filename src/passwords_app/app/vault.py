@@ -89,6 +89,8 @@ class Vault(GObject.Object):
         self._hibp_factory = hibp or HibpClient
         self._by_id: dict[str, ItemObject] = {}
         self._reload_source = 0
+        self._reload_items = False
+        self._trash_loaded = False
         self._scan_source = 0
         self._scan_generation = 0
         self.scanning = False
@@ -132,14 +134,21 @@ class Vault(GObject.Object):
         return sum(1 for o in self._by_id.values() if o.item.group == group)
 
     # ---------------------------------------------------------------- loading
-    def schedule_reload(self) -> None:
-        """Coalesce bursts of ItemsChanged (a sync cycle may emit many) into one reload."""
+    def schedule_reload(self, *, items: bool = True) -> None:
+        """Coalesce bursts of ItemsChanged (a sync cycle may emit many) into one reload.
+
+        The trash is always reloaded; `items=False` leaves the live list alone.
+        """
+        self._reload_items = self._reload_items or items
         if not self._reload_source:
             self._reload_source = GLib.timeout_add(_RELOAD_DELAY_MS, self._reload_now)
 
     def _reload_now(self) -> bool:
         self._reload_source = 0
-        self.reload()
+        if self._reload_items:
+            self.client.list_items(self._on_items)
+        self._reload_items = False
+        self.client.list_trash(self._on_trash)
         return GLib.SOURCE_REMOVE
 
     def reload(self) -> None:
@@ -177,6 +186,7 @@ class Vault(GObject.Object):
             self._fail(result)
             return
         ordered = sorted(result, key=lambda e: e.deleted_at, reverse=True)
+        self._trash_loaded = True
         self.trash.splice(0, self.trash.get_n_items(), [TrashObject(e) for e in ordered])
         self.emit("trash-changed")
 
@@ -193,6 +203,10 @@ class Vault(GObject.Object):
 
     def _on_status_signal(self, status: Status) -> None:
         self._set_status(status)
+        # Retention purges in a sync cycle change no live item, so no ItemsChanged names
+        # them: the lower trash count is their only announcement.
+        if self._trash_loaded and status.trash_count != self.trash.get_n_items():
+            self.schedule_reload(items=False)
 
     def _on_items_signal(self, _ids: list[str]) -> None:
         self.schedule_reload()

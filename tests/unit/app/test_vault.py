@@ -339,6 +339,34 @@ def test_deleted_item_moves_to_trash(vault: Vault) -> None:
     assert newest.entry.item.id == obj.item.id
 
 
+def test_trash_purged_by_retention_leaves_the_deleted_view(
+    vault: Vault, fake: FakeDaemonThread
+) -> None:
+    # Retention purges announce nothing but the status's lower trash_count (#69).
+    events = Events(vault)
+    before = list_calls(fake)
+    oldest = trash_objects(vault)[-1].entry.trash_id
+    fake.call(lambda d: d.expire_trash(oldest))
+    wait_until(lambda: vault.status.trash_count == 4, what="StatusChanged")
+    wait_until(lambda: vault.trash.get_n_items() == 4, what="trash reload")
+    assert oldest not in {o.entry.trash_id for o in trash_objects(vault)}
+    pump(0.3)
+    assert events.count("trash-changed") == 1
+    assert list_calls(fake) == before  # the live items did not change
+
+
+def test_deleting_reloads_the_trash_once(vault: Vault, fake: FakeDaemonThread) -> None:
+    # ItemsChanged and the higher trash_count arrive together; one trash reload covers both.
+    events = Events(vault)
+    obj = vault.items.get_item(0)
+    assert obj is not None
+    ok(partial(vault.client.delete, obj.item.id))
+    wait_until(lambda: vault.trash.get_n_items() == 6, what="trash reload")
+    pump(0.3)
+    assert events.count("trash-changed") == 1
+    assert fake.call(lambda d: d.calls.count("ListTrash")) == 2  # start-up and this one
+
+
 def test_list_failure_emits_failed(vault: Vault, fake: FakeDaemonThread) -> None:
     events = Events(vault)
     fake.call(lambda d: d.fail_next("List", "Unavailable", "iCloud is busy"))

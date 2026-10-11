@@ -290,6 +290,11 @@ class FakeDaemon(ServiceInterface):
         self._pending_remote = list(remote_ids)
         self._publish_status()
 
+    def expire_trash(self, trash_id: str) -> None:
+        """Drop a trash entry past its retention as a sync cycle does: StatusChanged only."""
+        del self.trash[trash_id]
+        self._publish_status()
+
     def add_item(  # noqa: PLR0913 - mirrors the Credential fields
         self,
         url: str,
