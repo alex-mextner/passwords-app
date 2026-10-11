@@ -72,12 +72,19 @@ packages = ["src/passwords_app"]
 # ---------------------------------------------------------------- tests
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+# Shared fakes are imported as `tests.fakes.*`; importlib mode does not put the rootdir on sys.path.
+pythonpath = ["."]
 addopts = ["-ra", "--strict-markers", "--strict-config", "--import-mode=importlib"]
 asyncio_mode = "auto"
 asyncio_default_fixture_loop_scope = "function"
 timeout = 120
 xfail_strict = true
-filterwarnings = ["error"]
+filterwarnings = [
+    "error",
+    # PyGObject's own GLib overrides touch the deprecated GLib.unix_* aliases while loading;
+    # nothing in our code can avoid it.
+    "ignore:GLib\\.unix_.* is deprecated; use GLibUnix\\.:DeprecationWarning",
+]
 markers = [
     "integration: needs a private D-Bus session and gnome-keyring",
     "e2e: full stack against the fake CloudKit server",
@@ -95,6 +102,8 @@ parallel = true
 [tool.coverage.report]
 show_missing = true
 skip_covered = true
+# core/ and sync/ have no __init__.py; without this a never-imported module drops out of the total.
+include_namespace_packages = true
 exclude_also = ["if TYPE_CHECKING:", "raise NotImplementedError", "\\.\\.\\.$"]
 
 # ---------------------------------------------------------------- lint
@@ -113,7 +122,8 @@ ignore = [
 ]
 
 [tool.ruff.lint.per-file-ignores]
-"tests/**" = ["S101", "PLR2004", "D", "ANN401", "SLF001", "INP001", "FBT001", "ARG001"]
+# S105-S107: tests build fake credentials on purpose; gitleaks and semgrep p/secrets guard real ones.
+"tests/**" = ["S101", "S105", "S106", "S107", "PLR2004", "D", "ANN401", "SLF001", "INP001", "FBT001", "ARG001"]
 
 [tool.ruff.lint.pydocstyle]
 convention = "pep257"
@@ -125,7 +135,9 @@ ban-relative-imports = "parents"
 python_version = "3.13"
 strict = true
 files = ["src", "tests"]
-mypy_path = "src"
+# tests/ has no __init__.py: shared helpers are imported as `tests.<pkg>.<mod>` from the repo root.
+mypy_path = ["src", "."]
+explicit_package_bases = true
 warn_unreachable = true
 enable_error_code = ["ignore-without-code", "redundant-expr", "truthy-bool", "possibly-undefined", "explicit-override"]
 
@@ -135,9 +147,17 @@ ignore_missing_imports = true
 
 [tool.pyright]
 include = ["src"]
+# No venvPath/venv here: in that mode pyright reads only the venv's own site-packages and misses
+# Ubuntu's dist-packages (pycairo). Run it with the venv's interpreter instead (an activated
+# venv, or `--pythonpath .venv/bin/python` as scripts/check.sh does) so it sees the venv's
+# pygobject-stubs first and the system packages after them.
+extraPaths = ["."]
 pythonVersion = "3.13"
 typeCheckingMode = "strict"
 reportMissingTypeStubs = false
+# PyGObject itself lives in Ubuntu's dist-packages, outside the venv pyright reads; its types
+# come from pygobject-stubs, so only the "source not found" notice is silenced.
+reportMissingModuleSource = false
 
 [tool.bandit]
 exclude_dirs = ["tests"]

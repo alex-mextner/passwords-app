@@ -1,0 +1,51 @@
+# SPDX-FileCopyrightText: 2026 Alex Mextner
+# SPDX-License-Identifier: MIT
+#
+# Shared CI setup for jobs running in the ubuntu:26.04 container: the job's apt packages, uv,
+# and the project venv built exactly like a developer machine, so scripts/check.sh behaves
+# the same in CI as locally. The calling job installs git and checks out first: a `./` local
+# action is only reachable from a checkout.
+name: Project setup
+description: Install apt packages, uv and the project venv for scripts/check.sh
+
+inputs:
+  apt-packages:
+    description: Space-separated apt packages this job needs on top of python3
+    required: false
+    default: ""
+
+runs:
+  using: composite
+  steps:
+    - name: Install apt packages
+      shell: bash
+      env:
+        APT_PACKAGES: ${{ inputs.apt-packages }}
+        DEBIAN_FRONTEND: noninteractive
+      run: |
+        set -euo pipefail
+        apt-get update -qq
+        # Word splitting is the point: APT_PACKAGES is a space-separated list.
+        # shellcheck disable=SC2086
+        apt-get install -y -qq --no-install-recommends python3 $APT_PACKAGES
+
+    # The container runs as root while the runner owns the workspace; without this every git
+    # call in check.sh fails with "dubious ownership".
+    - name: Trust the workspace
+      shell: bash
+      run: git config --global --add safe.directory "$GITHUB_WORKSPACE"
+
+    - name: Install uv
+      uses: astral-sh/setup-uv@1c37ad07a6a961277cf70c0d37d6f313000f5884 # v10.3.0
+      with:
+        version: "0.13.0"
+        # A cache shared across PRs could be poisoned by one of them; installs are fast enough.
+        enable-cache: false
+
+    - name: Create the project venv
+      shell: bash
+      run: |
+        set -euo pipefail
+        uv venv --python /usr/bin/python3 --system-site-packages .venv
+        uv pip install -e . --group dev
+        uv pip install --no-deps pygobject-stubs

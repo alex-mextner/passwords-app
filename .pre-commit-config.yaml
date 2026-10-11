@@ -1,0 +1,76 @@
+# SPDX-FileCopyrightText: 2026 Alex Mextner
+# SPDX-License-Identifier: MIT
+#
+# The fast gates of scripts/check.sh, run on commit. Every hook calls check.sh so a gate is
+# configured in exactly one place; slow gates (types, semgrep, pip-audit, tests) run in CI
+# and through `scripts/check.sh all`.
+# Install: `uv tool install pre-commit && pre-commit install`.
+default_install_hook_types: [pre-commit]
+fail_fast: false
+repos:
+  - repo: local
+    hooks:
+      - id: gitleaks
+        name: gitleaks (staged changes)
+        entry: gitleaks git --pre-commit --staged --redact --no-banner
+        language: system
+        pass_filenames: false
+      - id: ruff
+        name: ruff
+        entry: scripts/check.sh ruff
+        language: system
+        types: [python]
+        pass_filenames: false
+      - id: ruff-format
+        name: ruff format --check
+        entry: scripts/check.sh ruff-format
+        language: system
+        types: [python]
+        pass_filenames: false
+      - id: codespell
+        name: codespell
+        entry: scripts/check.sh codespell
+        language: system
+        types: [text]
+        pass_filenames: false
+      - id: reuse
+        name: reuse lint
+        entry: scripts/check.sh reuse
+        language: system
+        pass_filenames: false
+      - id: yamllint
+        name: yamllint
+        entry: scripts/check.sh yamllint
+        language: system
+        types: [yaml]
+        pass_filenames: false
+      - id: actionlint
+        name: actionlint
+        entry: scripts/check.sh actionlint
+        language: system
+        files: ^\.github/workflows/
+        pass_filenames: false
+      - id: zizmor
+        name: zizmor
+        entry: scripts/check.sh zizmor
+        language: system
+        files: ^\.github/
+        pass_filenames: false
+      - id: shellcheck
+        name: shellcheck
+        entry: scripts/check.sh shellcheck
+        language: system
+        types: [shell]
+        pass_filenames: false
+      - id: shfmt
+        name: shfmt
+        entry: scripts/check.sh shfmt
+        language: system
+        types: [shell]
+        pass_filenames: false
+      - id: data
+        name: desktop/appstream/gschema/D-Bus XML
+        entry: scripts/check.sh data
+        language: system
+        files: ^data/
+        pass_filenames: false
