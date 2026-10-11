@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "passwords-app"
-version = "0.3.1"
+version = "0.3.2"
 description = "Two-way iCloud Keychain sync for Linux: GNOME Keyring, a native Passwords app, and browser autofill"
 readme = "README.md"
 license = "MIT"
@@ -20,7 +20,9 @@ classifiers = [
 ]
 dependencies = [
     "cryptography>=44",
-    "dbus-fast>=2.44",
+    # daemon/bus.py replaces dbus-fast's private writer with a copy of 5.2's; check that copy
+    # (and whether upstream now survives EAGAIN, issue #122) before widening this range.
+    "dbus-fast>=5.2,<5.3",
     "idna>=3.7",
     "publicsuffixlist>=1.0.2",
     "pynacl>=1.5",
