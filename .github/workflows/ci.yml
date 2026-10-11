@@ -237,7 +237,13 @@ jobs:
       - name: Setup
         uses: ./.github/actions/setup # zizmor: ignore[self-repository]
         with:
-          apt-packages: curl gpg dbus-daemon gnome-keyring ffmpeg ${{ env.GI_PACKAGES }}
+          # unzip: setup-bun unpacks a zip; the e2e tests build the extension with bun.
+          apt-packages: curl gpg dbus-daemon gnome-keyring ffmpeg unzip ${{ env.GI_PACKAGES }}
+      - name: Install bun
+        uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
+        with:
+          bun-version: 1.4.3
+          no-cache: true # a cache shared across PRs could be poisoned
       - name: Install Firefox and geckodriver
         run: |
           set -euo pipefail

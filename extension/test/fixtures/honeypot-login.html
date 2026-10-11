@@ -1,0 +1,21 @@
+<!doctype html>
+<!-- SPDX-FileCopyrightText: 2026 Alex Mextner -->
+<!-- SPDX-License-Identifier: MIT -->
+<html lang="en">
+<head><meta charset="utf-8"><title>Login · Alpine Ski House</title>
+<style>.hp { display: none; } .ghost { opacity: 0; }</style></head>
+<body>
+<form id="hpf" action="/login" method="post">
+  <input type="hidden" id="hcsrf" name="csrf" value="c-example">
+  <input type="text" id="hp1" name="website" style="display:none">
+  <div class="field" aria-hidden="true"><input type="email" id="hp2" name="email_confirm" tabindex="-1"></div>
+  <div hidden><input type="text" id="hp3" name="username2"></div>
+  <input type="text" id="hp4" name="nickname" style="visibility:hidden">
+  <div class="hp"><input type="password" id="hp5" name="pw_trap"></div>
+  <div class="ghost"><input type="text" id="hp6" name="login_trap"></div>
+  <label for="hu">Username</label><input id="hu" name="username" type="text">
+  <label for="hpw">Password</label><input id="hpw" name="password" type="password">
+  <button type="submit">Log in</button>
+</form>
+</body>
+</html>

@@ -1,0 +1,17 @@
+<!doctype html>
+<!-- SPDX-FileCopyrightText: 2026 Alex Mextner -->
+<!-- SPDX-License-Identifier: MIT -->
+<html lang="en">
+<head><meta charset="utf-8"><title>Two-step verification</title></head>
+<body>
+<main>
+  <h1>Two-step verification</h1>
+  <p>Enter the 6-digit code from your authenticator app.</p>
+  <form id="otp-form" action="/two-factor" method="post">
+    <input id="code" name="code" type="text" autocomplete="one-time-code" inputmode="numeric" maxlength="6" pattern="[0-9]*">
+    <button type="submit">Verify</button>
+  </form>
+  <a href="/two-factor/recovery">Use a recovery code</a>
+</main>
+</body>
+</html>

@@ -1,0 +1,24 @@
+<!doctype html>
+<!-- SPDX-FileCopyrightText: 2026 Alex Mextner -->
+<!-- SPDX-License-Identifier: MIT -->
+<html lang="en">
+<head><meta charset="utf-8"><title>Confirm your email · Proseware</title></head>
+<body>
+<main>
+  <h1>Check your inbox</h1>
+  <p>We sent a code to a***@example.com.</p>
+  <form id="verify" action="/verify" method="post">
+    <fieldset class="digits">
+      <legend>Verification code</legend>
+      <input id="d1" type="text" inputmode="numeric" maxlength="1" aria-label="Digit 1">
+      <input id="d2" type="text" inputmode="numeric" maxlength="1" aria-label="Digit 2">
+      <input id="d3" type="text" inputmode="numeric" maxlength="1" aria-label="Digit 3">
+      <input id="d4" type="text" inputmode="numeric" maxlength="1" aria-label="Digit 4">
+      <input id="d5" type="text" inputmode="numeric" maxlength="1" aria-label="Digit 5">
+      <input id="d6" type="text" inputmode="numeric" maxlength="1" aria-label="Digit 6">
+    </fieldset>
+    <button type="submit">Verify</button>
+  </form>
+</main>
+</body>
+</html>

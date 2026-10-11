@@ -1,0 +1,1542 @@
+[
+ {
+  "page": "https://example.com/login",
+  "url": "https://example.com",
+  "alt": [],
+  "expected": "exact-host"
+ },
+ {
+  "page": "https://example.com",
+  "url": "https://example.com/",
+  "alt": [],
+  "expected": "exact-host"
+ },
+ {
+  "page": "https://example.com/a/b?x=1#y",
+  "url": "https://example.com/other",
+  "alt": [],
+  "expected": "exact-host"
+ },
+ {
+  "page": "https://example.com",
+  "url": "example.com",
+  "alt": [],
+  "expected": "exact-host"
+ },
+ {
+  "page": "https://example.com/path",
+  "url": "example.com/login",
+  "alt": [],
+  "expected": "exact-host"
+ },
+ {
+  "page": "https://EXAMPLE.COM/",
+  "url": "https://example.com",
+  "alt": [],
+  "expected": "exact-host"
+ },
+ {
+  "page": "https://example.com",
+  "url": "HTTPS://Example.Com",
+  "alt": [],
+  "expected": "exact-host"
+ },
+ {
+  "page": "HTTPS://EXAMPLE.COM/LOGIN",
+  "url": "example.com",
+  "alt": [],
+  "expected": "exact-host"
+ },
+ {
+  "page": "https://www.example.com",
+  "url": "https://example.com",
+  "alt": [],
+  "expected": "exact-host"
+ },
+ {
+  "page": "https://example.com",
+  "url": "https://www.example.com",
+  "alt": [],
+  "expected": "exact-host"
+ },
+ {
+  "page": "https://www.example.com/login",
+  "url": "www.example.com",
+  "alt": [],
+  "expected": "exact-host"
+ },
+ {
+  "page": "https://WWW.example.com",
+  "url": "example.com",
+  "alt": [],
+  "expected": "exact-host"
+ },
+ {
+  "page": "https://www.www.example.com",
+  "url": "https://example.com",
+  "alt": [],
+  "expected": "same-site"
+ },
+ {
+  "page": "https://www2.example.com",
+  "url": "https://example.com",
+  "alt": [],
+  "expected": "same-site"
+ },
+ {
+  "page": "https://wwwexample.com",
+  "url": "https://example.com",
+  "alt": [],
+  "expected": "none"
+ },
+ {
+  "page": "https://www.example.com",
+  "url": "https://wwwexample.com",
+  "alt": [],
+  "expected": "none"
+ },
+ {
+  "page": "https://login.example.com",
+  "url": "https://example.com",
+  "alt": [],
+  "expected": "same-site"
+ },
+ {
+  "page": "https://example.com",
+  "url": "https://login.example.com",
+  "alt": [],
+  "expected": "same-site"
+ },
+ {
+  "page": "https://a.b.example.com",
+  "url": "https://example.com",
+  "alt": [],
+  "expected": "same-site"
+ },
+ {
+  "page": "https://example.com",
+  "url": "https://a.b.c.example.com",
+  "alt": [],
+  "expected": "same-site"
+ },
+ {
+  "page": "https://mail.example.com",
+  "url": "https://accounts.example.com",
+  "alt": [],
+  "expected": "same-site"
+ },
+ {
+  "page": "https://deep.sub.example.com",
+  "url": "https://other.sub.example.com",
+  "alt": [],
+  "expected": "same-site"
+ },
+ {
+  "page": "https://login.example.com",
+  "url": "https://login.example.com",
+  "alt": [],
+  "expected": "exact-host"
+ },
+ {
+  "page": "https://login.example.com",
+  "url": "https://www.login.example.com",
+  "alt": [],
+  "expected": "exact-host"
+ },
+ {
+  "page": "https://www.login.example.com",
+  "url": "https://login.example.com",
+  "alt": [],
+  "expected": "exact-host"
+ },
+ {
+  "page": "https://accounts.google.com",
+  "url": "https://google.com",
+  "alt": [],
+  "expected": "same-site"
+ },
+ {
+  "page": "https://m.facebook.com",
+  "url": "https://www.facebook.com",
+  "alt": [],
+  "expected": "same-site"
+ },
+ {
+  "page": "https://signin.aws.amazon.com",
+  "url": "https://console.aws.amazon.com",
+  "alt": [],
+  "expected": "same-site"
+ },
+ {
+  "page": "https://example.com.evil.com",
+  "url": "https://example.com",
+  "alt": [],
+  "expected": "none"
+ },
+ {
+  "page": "https://example.com",
+  "url": "https://example.com.evil.com",
+  "alt": [],
+  "expected": "none"
+ },
+ {
+  "page": "https://evil.com",
+  "url": "https://example.com",
+  "alt": [],
+  "expected": "none"
+ },
+ {
+  "page": "https://notexample.com",
+  "url": "https://example.com",
+  "alt": [],
+  "expected": "none"
+ },
+ {
+  "page": "https://example.com",
+  "url": "https://notexample.com",
+  "alt": [],
+  "expected": "none"
+ },
+ {
+  "page": "https://examp1e.com",
+  "url": "https://example.com",
+  "alt": [],
+  "expected": "none"
+ },
+ {
+  "page": "https://example.co",
+  "url": "https://example.com",
+  "alt": [],
+  "expected": "none"
+ },
+ {
+  "page": "https://example.com",
+  "url": "https://example.co",
+  "alt": [],
+  "expected": "none"
+ },
+ {
+  "page": "https://example.net",
+  "url": "https://example.com",
+  "alt": [],
+  "expected": "none"
+ },
+ {
+  "page": "https://example.com.au",
+  "url": "https://example.com",
+  "alt": [],
+  "expected": "none"
+ },
+ {
+  "page": "https://example-com.evil.com",
+  "url": "https://example.com",
+  "alt": [],
+  "expected": "none"
+ },
+ {
+  "page": "https://exampl.com",
+  "url": "https://example.com",
+  "alt": [],
+  "expected": "none"
+ },
+ {
+  "page": "https://example.comm",
+  "url": "https://example.com",
+  "alt": [],
+  "expected": "none"
+ },
+ {
+  "page": "https://xexample.com",
+  "url": "https://example.com",
+  "alt": [],
+  "expected": "none"
+ },
+ {
+  "page": "https://example.com-login.net",
+  "url": "https://example.com",
+  "alt": [],
+  "expected": "none"
+ },
+ {
+  "page": "https://login-example.com",
+  "url": "https://login.example.com",
+  "alt": [],
+  "expected": "none"
+ },
+ {
+  "page": "https://paypal.com.secure-login.ru",
+  "url": "https://paypal.com",
+  "alt": [],
+  "expected": "none"
+ },
+ {
+  "page": "https://xn--pypal-4ve.com",
+  "url": "https://paypal.com",
+  "alt": [],
+  "expected": "none"
+ },
+ {
+  "page": "https://раураl.com",
+  "url": "https://paypal.com",
+  "alt": [],
+  "expected": "none"
+ },
+ {
+  "page": "https://example.com.",
+  "url": "https://example.com.evil.com",
+  "alt": [],
+  "expected": "none"
+ },
+ {
+  "page": "https://com",
+  "url": "https://example.com",
+  "alt": [],
+  "expected": "none"
+ },
+ {
+  "page": "https://example.com",
+  "url": "https://com",
+  "alt": [],
+  "expected": "none"
+ },
+ {
+  "page": "https://example.com@evil.com",
+  "url": "https://example.com",
+  "alt": [],
+  "expected": "none"
+ },
+ {
+  "page": "https://example.com:pw@evil.com/",
+  "url": "https://example.com",
+  "alt": [],
+  "expected": "none"
+ },
+ {
+  "page": "https://user@example.com",
+  "url": "https://example.com",
+  "alt": [],
+  "expected": "exact-host"
+ },
+ {
+  "page": "https://user:pass@example.com/login",
+  "url": "https://example.com",
+  "alt": [],
+  "expected": "exact-host"
+ },
+ {
+  "page": "https://evil.com@example.com",
+  "url": "https://example.com",
+  "alt": [],
+  "expected": "exact-host"
+ },
+ {
+  "page": "https://example.com",
+  "url": "https://example.com@evil.com",
+  "alt": [],
+  "expected": "none"
+ },
+ {
+  "page": "https://evil.com",
+  "url": "https://example.com@evil.com",
+  "alt": [],
+  "expected": "exact-host"
+ },
+ {
+  "page": "https://evil.com/@example.com",
+  "url": "https://example.com",
+  "alt": [],
+  "expected": "none"
+ },
+ {
+  "page": "https://evil.com/?u=https://example.com",
+  "url": "https://example.com",
+  "alt": [],
+  "expected": "none"
+ },
+ {
+  "page": "https://evil.com/#example.com",
+  "url": "https://example.com",
+  "alt": [],
+  "expected": "none"
+ },
+ {
+  "page": "https://evil.com/example.com",
+  "url": "https://example.com",
+  "alt": [],
+  "expected": "none"
+ },
+ {
+  "page": "http://example.com",
+  "url": "https://example.com",
+  "alt": [],
+  "expected": "none"
+ },
+ {
+  "page": "http://login.example.com",
+  "url": "https://example.com",
+  "alt": [],
+  "expected": "none"
+ },
+ {
+  "page": "http://www.example.com",
+  "url": "https://example.com",
+  "alt": [],
+  "expected": "none"
+ },
+ {
+  "page": "http://example.com",
+  "url": "example.com",
+  "alt": [],
+  "expected": "none"
+ },
+ {
+  "page": "https://example.com",
+  "url": "http://example.com",
+  "alt": [],
+  "expected": "exact-host"
+ },
+ {
+  "page": "https://login.example.com",
+  "url": "http://example.com",
+  "alt": [],
+  "expected": "same-site"
+ },
+ {
+  "page": "https://www.example.com",
+  "url": "http://example.com",
+  "alt": [],
+  "expected": "exact-host"
+ },
+ {
+  "page": "http://example.com",
+  "url": "http://example.com",
+  "alt": [],
+  "expected": "exact-host"
+ },
+ {
+  "page": "http://login.example.com",
+  "url": "http://example.com",
+  "alt": [],
+  "expected": "same-site"
+ },
+ {
+  "page": "http://example.com/login",
+  "url": "HTTP://EXAMPLE.COM",
+  "alt": [],
+  "expected": "exact-host"
+ },
+ {
+  "page": "http://evil.com",
+  "url": "http://example.com",
+  "alt": [],
+  "expected": "none"
+ },
+ {
+  "page": "javascript:alert(1)",
+  "url": "https://example.com",
+  "alt": [],
+  "expected": "none"
+ },
+ {
+  "page": "javascript://example.com/%0aalert(1)",
+  "url": "https://example.com",
+  "alt": [],
+  "expected": "none"
+ },
+ {
+  "page": "data:text/html,<h1>example.com</h1>",
+  "url": "https://example.com",
+  "alt": [],
+  "expected": "none"
+ },
+ {
+  "page": "file:///home/user/example.com.html",
+  "url": "https://example.com",
+  "alt": [],
+  "expected": "none"
+ },
+ {
+  "page": "file://example.com/x",
+  "url": "https://example.com",
+  "alt": [],
+  "expected": "none"
+ },
+ {
+  "page": "ftp://example.com",
+  "url": "https://example.com",
+  "alt": [],
+  "expected": "none"
+ },
+ {
+  "page": "ftp://example.com",
+  "url": "ftp://example.com",
+  "alt": [],
+  "expected": "none"
+ },
+ {
+  "page": "ws://example.com",
+  "url": "https://example.com",
+  "alt": [],
+  "expected": "none"
+ },
+ {
+  "page": "wss://example.com",
+  "url": "https://example.com",
+  "alt": [],
+  "expected": "none"
+ },
+ {
+  "page": "chrome://settings",
+  "url": "https://example.com",
+  "alt": [],
+  "expected": "none"
+ },
+ {
+  "page": "about:blank",
+  "url": "https://example.com",
+  "alt": [],
+  "expected": "none"
+ },
+ {
+  "page": "blob:https://example.com/uuid",
+  "url": "https://example.com",
+  "alt": [],
+  "expected": "none"
+ },
+ {
+  "page": "mailto:user@example.com",
+  "url": "https://example.com",
+  "alt": [],
+  "expected": "none"
+ },
+ {
+  "page": "view-source:https://example.com",
+  "url": "https://example.com",
+  "alt": [],
+  "expected": "none"
+ },
+ {
+  "page": "moz-extension://abc/page.html",
+  "url": "https://example.com",
+  "alt": [],
+  "expected": "none"
+ },
+ {
+  "page": "https://example.com",
+  "url": "ftp://example.com",
+  "alt": [],
+  "expected": "none"
+ },
+ {
+  "page": "https://example.com",
+  "url": "ssh://example.com",
+  "alt": [],
+  "expected": "none"
+ },
+ {
+  "page": "https://example.com",
+  "url": "javascript:alert(1)",
+  "alt": [],
+  "expected": "none"
+ },
+ {
+  "page": "https://example.com",
+  "url": "android://hash@com.example.app/",
+  "alt": [],
+  "expected": "none"
+ },
+ {
+  "page": "https://example.com:8443",
+  "url": "https://example.com:8443",
+  "alt": [],
+  "expected": "exact-host"
+ },
+ {
+  "page": "https://example.com:8443/login",
+  "url": "https://example.com",
+  "alt": [],
+  "expected": "none"
+ },
+ {
+  "page": "https://example.com",
+  "url": "https://example.com:8443",
+  "alt": [],
+  "expected": "none"
+ },
+ {
+  "page": "https://example.com:8443",
+  "url": "https://example.com:9443",
+  "alt": [],
+  "expected": "none"
+ },
+ {
+  "page": "https://example.com:443",
+  "url": "https://example.com",
+  "alt": [],
+  "expected": "exact-host"
+ },
+ {
+  "page": "https://example.com",
+  "url": "https://example.com:443",
+  "alt": [],
+  "expected": "exact-host"
+ },
+ {
+  "page": "http://example.com:80",
+  "url": "http://example.com",
+  "alt": [],
+  "expected": "exact-host"
+ },
+ {
+  "page": "https://example.com",
+  "url": "http://example.com:80",
+  "alt": [],
+  "expected": "exact-host"
+ },
+ {
+  "page": "https://example.com:80",
+  "url": "http://example.com",
+  "alt": [],
+  "expected": "exact-host"
+ },
+ {
+  "page": "https://example.com:80",
+  "url": "https://example.com",
+  "alt": [],
+  "expected": "none"
+ },
+ {
+  "page": "http://example.com:443",
+  "url": "https://example.com",
+  "alt": [],
+  "expected": "none"
+ },
+ {
+  "page": "https://login.example.com:8443",
+  "url": "https://example.com:8443",
+  "alt": [],
+  "expected": "same-site"
+ },
+ {
+  "page": "https://login.example.com:8443",
+  "url": "https://example.com",
+  "alt": [],
+  "expected": "none"
+ },
+ {
+  "page": "https://example.com:8080",
+  "url": "example.com:8080",
+  "alt": [],
+  "expected": "exact-host"
+ },
+ {
+  "page": "http://example.com:8080",
+  "url": "http://example.com:8080",
+  "alt": [],
+  "expected": "exact-host"
+ },
+ {
+  "page": "https://example.com:8080",
+  "url": "http://example.com:8080",
+  "alt": [],
+  "expected": "exact-host"
+ },
+ {
+  "page": "http://example.com:8080",
+  "url": "https://example.com:8080",
+  "alt": [],
+  "expected": "none"
+ },
+ {
+  "page": "https://www.example.com:8443",
+  "url": "https://example.com:8443",
+  "alt": [],
+  "expected": "exact-host"
+ },
+ {
+  "page": "https://example.com:65535",
+  "url": "https://example.com:65535",
+  "alt": [],
+  "expected": "exact-host"
+ },
+ {
+  "page": "https://example.com:1",
+  "url": "https://example.com:1",
+  "alt": [],
+  "expected": "exact-host"
+ },
+ {
+  "page": "https://example.com:8443",
+  "url": "https://example.com:08443",
+  "alt": [],
+  "expected": "exact-host"
+ },
+ {
+  "page": "https://example.com.",
+  "url": "https://example.com",
+  "alt": [],
+  "expected": "exact-host"
+ },
+ {
+  "page": "https://example.com",
+  "url": "https://example.com.",
+  "alt": [],
+  "expected": "exact-host"
+ },
+ {
+  "page": "https://login.example.com.",
+  "url": "https://example.com",
+  "alt": [],
+  "expected": "same-site"
+ },
+ {
+  "page": "https://Login.Example.COM.",
+  "url": "https://LOGIN.example.com",
+  "alt": [],
+  "expected": "exact-host"
+ },
+ {
+  "page": "https://example.com..",
+  "url": "https://example.com",
+  "alt": [],
+  "expected": "none"
+ },
+ {
+  "page": "https://пример.рф",
+  "url": "https://xn--e1afmkfd.xn--p1ai",
+  "alt": [],
+  "expected": "exact-host"
+ },
+ {
+  "page": "https://xn--e1afmkfd.xn--p1ai",
+  "url": "https://пример.рф",
+  "alt": [],
+  "expected": "exact-host"
+ },
+ {
+  "page": "https://ПРИМЕР.РФ",
+  "url": "https://пример.рф",
+  "alt": [],
+  "expected": "exact-host"
+ },
+ {
+  "page": "https://вход.пример.рф",
+  "url": "https://пример.рф",
+  "alt": [],
+  "expected": "same-site"
+ },
+ {
+  "page": "https://пример.рф",
+  "url": "https://xn--d1acufc.xn--e1afmkfd.xn--p1ai",
+  "alt": [],
+  "expected": "same-site"
+ },
+ {
+  "page": "https://www.пример.рф",
+  "url": "https://xn--e1afmkfd.xn--p1ai",
+  "alt": [],
+  "expected": "exact-host"
+ },
+ {
+  "page": "https://другой.рф",
+  "url": "https://пример.рф",
+  "alt": [],
+  "expected": "none"
+ },
+ {
+  "page": "https://bücher.de",
+  "url": "https://xn--bcher-kva.de",
+  "alt": [],
+  "expected": "exact-host"
+ },
+ {
+  "page": "https://xn--bcher-kva.de",
+  "url": "https://BÜCHER.de",
+  "alt": [],
+  "expected": "exact-host"
+ },
+ {
+  "page": "https://shop.bücher.de",
+  "url": "https://bücher.de",
+  "alt": [],
+  "expected": "same-site"
+ },
+ {
+  "page": "https://bucher.de",
+  "url": "https://bücher.de",
+  "alt": [],
+  "expected": "none"
+ },
+ {
+  "page": "https://例え.テスト",
+  "url": "https://xn--r8jz45g.xn--zckzah",
+  "alt": [],
+  "expected": "exact-host"
+ },
+ {
+  "page": "https://münchen.de",
+  "url": "https://muenchen.de",
+  "alt": [],
+  "expected": "none"
+ },
+ {
+  "page": "https://xn--mnchen-3ya.de",
+  "url": "https://münchen.de",
+  "alt": [],
+  "expected": "exact-host"
+ },
+ {
+  "page": "https://пример。рф",
+  "url": "https://пример.рф",
+  "alt": [],
+  "expected": "exact-host"
+ },
+ {
+  "page": "https://192.168.1.1",
+  "url": "https://192.168.1.1",
+  "alt": [],
+  "expected": "exact-host"
+ },
+ {
+  "page": "https://192.168.1.1/admin",
+  "url": "192.168.1.1",
+  "alt": [],
+  "expected": "exact-host"
+ },
+ {
+  "page": "https://192.168.1.2",
+  "url": "https://192.168.1.1",
+  "alt": [],
+  "expected": "none"
+ },
+ {
+  "page": "https://10.0.0.1",
+  "url": "https://10.0.0.2",
+  "alt": [],
+  "expected": "none"
+ },
+ {
+  "page": "https://1.1.1.1",
+  "url": "https://1.1.1.2",
+  "alt": [],
+  "expected": "none"
+ },
+ {
+  "page": "https://192.168.1.1:8443",
+  "url": "https://192.168.1.1:8443",
+  "alt": [],
+  "expected": "exact-host"
+ },
+ {
+  "page": "https://192.168.1.1:8443",
+  "url": "https://192.168.1.1",
+  "alt": [],
+  "expected": "none"
+ },
+ {
+  "page": "http://192.168.1.1",
+  "url": "https://192.168.1.1",
+  "alt": [],
+  "expected": "none"
+ },
+ {
+  "page": "https://192.168.1.1",
+  "url": "http://192.168.1.1",
+  "alt": [],
+  "expected": "exact-host"
+ },
+ {
+  "page": "https://127.0.0.1",
+  "url": "https://localhost",
+  "alt": [],
+  "expected": "none"
+ },
+ {
+  "page": "https://192.168.1.1",
+  "url": "https://example.com",
+  "alt": [],
+  "expected": "none"
+ },
+ {
+  "page": "https://example.com",
+  "url": "https://93.184.216.34",
+  "alt": [],
+  "expected": "none"
+ },
+ {
+  "page": "https://1.168.192.in-addr.arpa",
+  "url": "https://192.168.1.1",
+  "alt": [],
+  "expected": "none"
+ },
+ {
+  "page": "https://192.168.1.1.",
+  "url": "https://192.168.1.1",
+  "alt": [],
+  "expected": "exact-host"
+ },
+ {
+  "page": "https://[::1]",
+  "url": "https://[::1]",
+  "alt": [],
+  "expected": "exact-host"
+ },
+ {
+  "page": "https://[::1]:8443",
+  "url": "https://[::1]:8443",
+  "alt": [],
+  "expected": "exact-host"
+ },
+ {
+  "page": "https://[::1]:8443",
+  "url": "https://[::1]",
+  "alt": [],
+  "expected": "none"
+ },
+ {
+  "page": "https://[2001:db8::1]",
+  "url": "https://[2001:0db8:0000:0000:0000:0000:0000:0001]",
+  "alt": [],
+  "expected": "exact-host"
+ },
+ {
+  "page": "https://[2001:DB8::1]",
+  "url": "https://[2001:db8::1]",
+  "alt": [],
+  "expected": "exact-host"
+ },
+ {
+  "page": "https://[2001:db8::1]",
+  "url": "https://[2001:db8::2]",
+  "alt": [],
+  "expected": "none"
+ },
+ {
+  "page": "https://[::ffff:192.168.1.1]",
+  "url": "https://192.168.1.1",
+  "alt": [],
+  "expected": "none"
+ },
+ {
+  "page": "https://[::1]",
+  "url": "https://localhost",
+  "alt": [],
+  "expected": "none"
+ },
+ {
+  "page": "http://[::1]",
+  "url": "https://[::1]",
+  "alt": [],
+  "expected": "none"
+ },
+ {
+  "page": "https://[2001:db8::1]/login",
+  "url": "[2001:db8::1]",
+  "alt": [],
+  "expected": "exact-host"
+ },
+ {
+  "page": "https://localhost",
+  "url": "https://localhost",
+  "alt": [],
+  "expected": "exact-host"
+ },
+ {
+  "page": "http://localhost:3000",
+  "url": "http://localhost:3000",
+  "alt": [],
+  "expected": "exact-host"
+ },
+ {
+  "page": "http://localhost:3000",
+  "url": "http://localhost:3001",
+  "alt": [],
+  "expected": "none"
+ },
+ {
+  "page": "http://localhost:3000",
+  "url": "http://localhost",
+  "alt": [],
+  "expected": "none"
+ },
+ {
+  "page": "https://a.localhost",
+  "url": "https://b.localhost",
+  "alt": [],
+  "expected": "none"
+ },
+ {
+  "page": "https://app.localhost",
+  "url": "https://localhost",
+  "alt": [],
+  "expected": "none"
+ },
+ {
+  "page": "https://router",
+  "url": "https://router",
+  "alt": [],
+  "expected": "exact-host"
+ },
+ {
+  "page": "https://router",
+  "url": "https://nas",
+  "alt": [],
+  "expected": "none"
+ },
+ {
+  "page": "https://nas.lan",
+  "url": "https://router.lan",
+  "alt": [],
+  "expected": "none"
+ },
+ {
+  "page": "https://nas.home.arpa",
+  "url": "https://router.home.arpa",
+  "alt": [],
+  "expected": "none"
+ },
+ {
+  "page": "https://a.example.local",
+  "url": "https://b.example.local",
+  "alt": [],
+  "expected": "same-site"
+ },
+ {
+  "page": "https://a.corp.internal",
+  "url": "https://b.corp.internal",
+  "alt": [],
+  "expected": "same-site"
+ },
+ {
+  "page": "https://alice.github.io",
+  "url": "https://bob.github.io",
+  "alt": [],
+  "expected": "none"
+ },
+ {
+  "page": "https://bob.github.io",
+  "url": "https://alice.github.io",
+  "alt": [],
+  "expected": "none"
+ },
+ {
+  "page": "https://alice.github.io",
+  "url": "https://alice.github.io",
+  "alt": [],
+  "expected": "exact-host"
+ },
+ {
+  "page": "https://alice.github.io/repo",
+  "url": "https://alice.github.io/other",
+  "alt": [],
+  "expected": "exact-host"
+ },
+ {
+  "page": "https://github.io",
+  "url": "https://alice.github.io",
+  "alt": [],
+  "expected": "none"
+ },
+ {
+  "page": "https://alice.github.io",
+  "url": "https://github.io",
+  "alt": [],
+  "expected": "none"
+ },
+ {
+  "page": "https://github.io",
+  "url": "https://github.io",
+  "alt": [],
+  "expected": "exact-host"
+ },
+ {
+  "page": "https://github.com",
+  "url": "https://alice.github.io",
+  "alt": [],
+  "expected": "none"
+ },
+ {
+  "page": "https://alice.github.io",
+  "url": "https://github.com",
+  "alt": [],
+  "expected": "none"
+ },
+ {
+  "page": "https://docs.alice.github.io",
+  "url": "https://alice.github.io",
+  "alt": [],
+  "expected": "same-site"
+ },
+ {
+  "page": "https://a.gitlab.io",
+  "url": "https://b.gitlab.io",
+  "alt": [],
+  "expected": "none"
+ },
+ {
+  "page": "https://app1.herokuapp.com",
+  "url": "https://app2.herokuapp.com",
+  "alt": [],
+  "expected": "none"
+ },
+ {
+  "page": "https://my.vercel.app",
+  "url": "https://your.vercel.app",
+  "alt": [],
+  "expected": "none"
+ },
+ {
+  "page": "https://a.netlify.app",
+  "url": "https://b.netlify.app",
+  "alt": [],
+  "expected": "none"
+ },
+ {
+  "page": "https://a.pages.dev",
+  "url": "https://b.pages.dev",
+  "alt": [],
+  "expected": "none"
+ },
+ {
+  "page": "https://x.blogspot.com",
+  "url": "https://y.blogspot.com",
+  "alt": [],
+  "expected": "none"
+ },
+ {
+  "page": "https://bucket1.s3.amazonaws.com",
+  "url": "https://bucket2.s3.amazonaws.com",
+  "alt": [],
+  "expected": "none"
+ },
+ {
+  "page": "https://s3.amazonaws.com",
+  "url": "https://bucket.s3.amazonaws.com",
+  "alt": [],
+  "expected": "none"
+ },
+ {
+  "page": "https://aws.amazon.com",
+  "url": "https://amazonaws.com",
+  "alt": [],
+  "expected": "none"
+ },
+ {
+  "page": "https://a.compute-1.amazonaws.com",
+  "url": "https://b.compute-1.amazonaws.com",
+  "alt": [],
+  "expected": "none"
+ },
+ {
+  "page": "https://example.co.uk",
+  "url": "https://example.co.uk",
+  "alt": [],
+  "expected": "exact-host"
+ },
+ {
+  "page": "https://login.example.co.uk",
+  "url": "https://example.co.uk",
+  "alt": [],
+  "expected": "same-site"
+ },
+ {
+  "page": "https://a.b.example.co.uk",
+  "url": "https://c.example.co.uk",
+  "alt": [],
+  "expected": "same-site"
+ },
+ {
+  "page": "https://example.co.uk",
+  "url": "https://other.co.uk",
+  "alt": [],
+  "expected": "none"
+ },
+ {
+  "page": "https://co.uk",
+  "url": "https://example.co.uk",
+  "alt": [],
+  "expected": "none"
+ },
+ {
+  "page": "https://example.co.uk",
+  "url": "https://co.uk",
+  "alt": [],
+  "expected": "none"
+ },
+ {
+  "page": "https://co.uk",
+  "url": "https://co.uk",
+  "alt": [],
+  "expected": "exact-host"
+ },
+ {
+  "page": "https://example.co.uk",
+  "url": "https://example.uk",
+  "alt": [],
+  "expected": "none"
+ },
+ {
+  "page": "https://example.uk",
+  "url": "https://example.co.uk",
+  "alt": [],
+  "expected": "none"
+ },
+ {
+  "page": "https://example.co.uk",
+  "url": "https://example.com",
+  "alt": [],
+  "expected": "none"
+ },
+ {
+  "page": "https://shop.example.com.au",
+  "url": "https://example.com.au",
+  "alt": [],
+  "expected": "same-site"
+ },
+ {
+  "page": "https://example.com.au",
+  "url": "https://other.com.au",
+  "alt": [],
+  "expected": "none"
+ },
+ {
+  "page": "https://com.au",
+  "url": "https://example.com.au",
+  "alt": [],
+  "expected": "none"
+ },
+ {
+  "page": "https://a.appspot.com",
+  "url": "https://b.appspot.com",
+  "alt": [],
+  "expected": "none"
+ },
+ {
+  "page": "https://a.appspot.com",
+  "url": "https://appspot.com",
+  "alt": [],
+  "expected": "none"
+ },
+ {
+  "page": "https://v2.a.appspot.com",
+  "url": "https://a.appspot.com",
+  "alt": [],
+  "expected": "same-site"
+ },
+ {
+  "page": "https://ex.co.jp",
+  "url": "https://www.ex.co.jp",
+  "alt": [],
+  "expected": "exact-host"
+ },
+ {
+  "page": "https://a.ex.co.jp",
+  "url": "https://b.ex.co.jp",
+  "alt": [],
+  "expected": "same-site"
+ },
+ {
+  "page": "https://a.gov.uk",
+  "url": "https://b.gov.uk",
+  "alt": [],
+  "expected": "none"
+ },
+ {
+  "page": "https://www.ox.ac.uk",
+  "url": "https://login.ox.ac.uk",
+  "alt": [],
+  "expected": "same-site"
+ },
+ {
+  "page": "https://a.b.c.kawasaki.jp",
+  "url": "https://d.b.c.kawasaki.jp",
+  "alt": [],
+  "expected": "same-site"
+ },
+ {
+  "page": "https://a.c.kawasaki.jp",
+  "url": "https://b.c.kawasaki.jp",
+  "alt": [],
+  "expected": "none"
+ },
+ {
+  "page": "https://a.x.ck",
+  "url": "https://b.x.ck",
+  "alt": [],
+  "expected": "none"
+ },
+ {
+  "page": "https://x.ck",
+  "url": "https://x.ck",
+  "alt": [],
+  "expected": "exact-host"
+ },
+ {
+  "page": "https://www.ck",
+  "url": "https://login.www.ck",
+  "alt": [],
+  "expected": "same-site"
+ },
+ {
+  "page": "https://example.org",
+  "url": "https://example.com",
+  "alt": [
+   "https://example.org"
+  ],
+  "expected": "exact-host"
+ },
+ {
+  "page": "https://login.example.org",
+  "url": "https://example.com",
+  "alt": [
+   "https://example.org"
+  ],
+  "expected": "same-site"
+ },
+ {
+  "page": "https://example.net",
+  "url": "https://example.com",
+  "alt": [
+   "https://example.org"
+  ],
+  "expected": "none"
+ },
+ {
+  "page": "https://example.com",
+  "url": "https://login.example.com",
+  "alt": [
+   "https://example.com"
+  ],
+  "expected": "exact-host"
+ },
+ {
+  "page": "https://example.org",
+  "url": "https://example.com",
+  "alt": [
+   "not a url",
+   "example.org"
+  ],
+  "expected": "exact-host"
+ },
+ {
+  "page": "http://example.org",
+  "url": "https://example.com",
+  "alt": [
+   "https://example.org"
+  ],
+  "expected": "none"
+ },
+ {
+  "page": "http://example.org",
+  "url": "https://example.com",
+  "alt": [
+   "http://example.org"
+  ],
+  "expected": "exact-host"
+ },
+ {
+  "page": "https://evil.com",
+  "url": "https://example.com",
+  "alt": [
+   "https://example.com@evil.com"
+  ],
+  "expected": "exact-host"
+ },
+ {
+  "page": "https://evil.com",
+  "url": "https://example.com",
+  "alt": [
+   "https://evil.com.example.com"
+  ],
+  "expected": "none"
+ },
+ {
+  "page": "https://example.org:8443",
+  "url": "https://example.com",
+  "alt": [
+   "https://example.org:8443"
+  ],
+  "expected": "exact-host"
+ },
+ {
+  "page": "https://example.org",
+  "url": "https://example.com",
+  "alt": [
+   "https://example.org:8443"
+  ],
+  "expected": "none"
+ },
+ {
+  "page": "https://a.example.org",
+  "url": "https://x.example.com",
+  "alt": [
+   "https://b.example.org"
+  ],
+  "expected": "same-site"
+ },
+ {
+  "page": "https://alice.github.io",
+  "url": "https://example.com",
+  "alt": [
+   "https://bob.github.io"
+  ],
+  "expected": "none"
+ },
+ {
+  "page": "https://example.com",
+  "url": "javascript:alert(1)",
+  "alt": [
+   "https://example.com"
+  ],
+  "expected": "exact-host"
+ },
+ {
+  "page": "https://example.com",
+  "url": "garbage ::: url",
+  "alt": [
+   "ftp://example.com",
+   "www.example.com"
+  ],
+  "expected": "exact-host"
+ },
+ {
+  "page": "https://shop.example.com",
+  "url": "https://example.com",
+  "alt": [
+   "https://shop.example.com"
+  ],
+  "expected": "exact-host"
+ },
+ {
+  "page": "not a url",
+  "url": "https://example.com",
+  "alt": [],
+  "expected": "none"
+ },
+ {
+  "page": "",
+  "url": "https://example.com",
+  "alt": [],
+  "expected": "none"
+ },
+ {
+  "page": "https://",
+  "url": "https://example.com",
+  "alt": [],
+  "expected": "none"
+ },
+ {
+  "page": "https:///path",
+  "url": "https://example.com",
+  "alt": [],
+  "expected": "none"
+ },
+ {
+  "page": "https://exa mple.com",
+  "url": "https://example.com",
+  "alt": [],
+  "expected": "none"
+ },
+ {
+  "page": "https://example.com:99999",
+  "url": "https://example.com",
+  "alt": [],
+  "expected": "none"
+ },
+ {
+  "page": "https://example.com:abc",
+  "url": "https://example.com",
+  "alt": [],
+  "expected": "none"
+ },
+ {
+  "page": "https://[::1",
+  "url": "https://example.com",
+  "alt": [],
+  "expected": "none"
+ },
+ {
+  "page": "https://example.com",
+  "url": "https://[::1",
+  "alt": [],
+  "expected": "none"
+ },
+ {
+  "page": "https://example.com",
+  "url": "http://",
+  "alt": [],
+  "expected": "none"
+ },
+ {
+  "page": "https://example.com",
+  "url": "https://exa mple.com",
+  "alt": [],
+  "expected": "none"
+ },
+ {
+  "page": "https://example.com",
+  "url": "https://example.com:0",
+  "alt": [],
+  "expected": "none"
+ },
+ {
+  "page": "https://example.com",
+  "url": "https://-example-.com",
+  "alt": [],
+  "expected": "none"
+ },
+ {
+  "page": "https://example..com",
+  "url": "https://example.com",
+  "alt": [],
+  "expected": "none"
+ },
+ {
+  "page": "https://.example.com",
+  "url": "https://example.com",
+  "alt": [],
+  "expected": "none"
+ },
+ {
+  "page": "https://a_b.example.com",
+  "url": "https://example.com",
+  "alt": [],
+  "expected": "same-site"
+ },
+ {
+  "page": "https://aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa.com",
+  "url": "https://example.com",
+  "alt": [],
+  "expected": "none"
+ },
+ {
+  "page": "https://xn--zz.com",
+  "url": "https://xn--zz.com",
+  "alt": [],
+  "expected": "none"
+ },
+ {
+  "page": "https://256.256.256.256",
+  "url": "https://256.256.256.256",
+  "alt": [],
+  "expected": "none"
+ },
+ {
+  "page": "https://0x7f.0.0.1",
+  "url": "https://127.0.0.1",
+  "alt": [],
+  "expected": "none"
+ },
+ {
+  "page": "\u0000https://example.com",
+  "url": "https://example.com",
+  "alt": [],
+  "expected": "none"
+ },
+ {
+  "page": "https://example.com\n.evil.com",
+  "url": "https://example.com",
+  "alt": [],
+  "expected": "none"
+ }
+]

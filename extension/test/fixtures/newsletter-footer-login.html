@@ -1,0 +1,23 @@
+<!doctype html>
+<!-- SPDX-FileCopyrightText: 2026 Alex Mextner -->
+<!-- SPDX-License-Identifier: MIT -->
+<html lang="en">
+<head><meta charset="utf-8"><title>Member login · Coho Winery</title></head>
+<body>
+<main>
+  <h1>Member login</h1>
+  <form id="login" action="/members/login" method="post">
+    <label for="m-email">Email</label><input id="m-email" type="email" name="email">
+    <label for="m-pass">Password</label><input id="m-pass" type="password" name="password">
+    <button type="submit">Log in</button>
+  </form>
+</main>
+<footer>
+  <form id="newsletter" action="/newsletter" method="post">
+    <h3>Join our newsletter</h3>
+    <input id="n-email" type="email" name="email" placeholder="you@example.com" autocomplete="email">
+    <button type="submit">Subscribe</button>
+  </form>
+</footer>
+</body>
+</html>

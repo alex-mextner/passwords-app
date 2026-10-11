@@ -1,0 +1,15 @@
+<!doctype html>
+<!-- SPDX-FileCopyrightText: 2026 Alex Mextner -->
+<!-- SPDX-License-Identifier: MIT -->
+<html lang="en">
+<head><meta charset="utf-8"><title>Forum login · Fabrikam</title></head>
+<body>
+<form id="forum" action="/forum/login" method="post">
+  <label for="f-user">Login</label><input id="f-user" name="user">
+  <label for="f-pass">Password</label><input id="f-pass" name="pass" type="password">
+  <img src="data:," alt="captcha">
+  <label for="f-captcha">Type the characters you see</label><input id="f-captcha" name="captcha_answer" maxlength="6">
+  <button type="submit">Log in</button>
+</form>
+</body>
+</html>
