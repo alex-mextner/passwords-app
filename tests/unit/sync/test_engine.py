@@ -11,6 +11,7 @@ from typing import TYPE_CHECKING, Any
 import pytest
 from tests.fakes.memory_stores import MemoryLocal, MemoryRemote, make_credential
 
+from passwords_app.core.model import TrashEntry
 from passwords_app.store.state import StateStore
 from passwords_app.sync.engine import (
     LAST_SYNC_KEY,
@@ -24,11 +25,14 @@ from passwords_app.sync.plan import content_key
 from passwords_app.sync.ports import (
     AuthRequired,
     ConflictError,
+    ItemRejected,
     LocalUnavailable,
     PendingDeletions,
     RejectedLocalItem,
     RemoteUnavailable,
     SyncPolicy,
+    UploadFailure,
+    upload_failures_message,
 )
 
 if TYPE_CHECKING:
@@ -347,46 +351,256 @@ async def test_s14_restore_puts_item_back_on_both_sides_under_its_own_id(w: Worl
 
 
 async def test_restore_never_takes_the_id_of_a_live_item(w: World) -> None:
+    # The id is live again for another site and account, so there is no twin to replace.
     a = make_credential("A", password="fake-old")
     await synced(w, a)
     w.local.remove("A")
     await w.engine.run_once()
     (entry,) = w.engine.trash()
-    w.local.put(at(a, 5, password="fake-live"))
+    w.local.put(make_credential("A", url="https://other.example", password="fake-live"))
     new_id = await w.engine.restore(entry.trash_id)
     assert new_id != "A"
     assert w.local.items["A"].password == "fake-live"
     assert w.local.items[new_id].password == "fake-old"
 
 
-async def test_restoring_two_versions_of_one_item_keeps_both(w: World) -> None:
-    a = make_credential("A", password="fake-v1")
+async def test_s12_restoring_the_conflict_loser_replaces_the_winner(w: World) -> None:
+    # #66: iCloud keeps one login per site and username, so the loser cannot come back
+    # next to the winner. Restoring it makes it the login again; the winner goes to trash.
+    w.remote.unique_logins = True
+    a = make_credential("A")
     await synced(w, a)
-    w.remote.remove("A")
+    w.local.put(at(a, 1, password="fake-loser"))
+    winner = at(a, 2, password="fake-winner")
+    w.remote.put(winner)
     await w.engine.run_once()
-    w.remote.put(at(a, 7, password="fake-v2"))  # recovered on the iPhone, then edited
-    await w.engine.run_once()
-    w.remote.remove("A")
-    await w.engine.run_once()
-    by_password = {e.credential.password: e for e in w.engine.trash()}
-    v1, v2 = by_password["fake-v1"], by_password["fake-v2"]
-    assert await w.engine.restore(v2.trash_id) == "A"
-    other = await w.engine.restore(v1.trash_id)
-    assert other != "A"
-    assert w.local.items["A"].password == "fake-v2"
-    assert w.local.items[other].password == "fake-v1"
+    (entry,) = w.engine.trash()
+    w.clock.advance(hours=1)
+    restored_id = await w.engine.restore(entry.trash_id)
+    assert restored_id == "A"
+    assert w.local.items["A"].password == "fake-loser"
+    assert w.local.items["A"].modified == w.clock.now
+    (displaced,) = w.engine.trash()
+    assert (displaced.credential, displaced.reason) == (winner, "conflict")
+    report = await w.engine.run_once()
+    assert report.skipped_reason is None
+    assert report.upload_failures == ()
+    assert report.updated_remote == 1
+    assert list(w.remote.items) == ["A"]
+    assert w.remote.items["A"].credential.password == "fake-loser"
+    assert w.converged()
 
 
-async def test_s14_restoring_a_conflict_loser_never_overwrites_the_winner(w: World) -> None:
+async def test_s12_after_restoring_the_loser_later_changes_still_reach_icloud(w: World) -> None:
+    w.remote.unique_logins = True
     a = make_credential("A")
     await synced(w, a)
     w.local.put(at(a, 1, password="fake-loser"))
     w.remote.put(at(a, 2, password="fake-winner"))
     await w.engine.run_once()
     (entry,) = w.engine.trash()
-    new_id = await w.engine.restore(entry.trash_id)
+    await w.engine.restore(entry.trash_id)
     await w.engine.run_once()
-    assert w.remote.items["A"].credential.password == "fake-winner"
+    w.local.put(make_credential("LATER"))
+    report = await w.engine.run_once()
+    assert report.skipped_reason is None
+    assert "LATER" in w.remote.items
+
+
+async def test_restoring_over_a_twin_matches_site_and_username_case_insensitively(
+    w: World,
+) -> None:
+    w.remote.unique_logins = True
+    old = make_credential("OLD", url="https://bank.example/login", username="Alice")
+    await synced(w, old)
+    w.local.remove("OLD")
+    await w.engine.run_once()
+    (entry,) = w.engine.trash()
+    live = make_credential("NEW", url="https://BANK.example/login", username="alice")
+    await synced(w, live)
+    restored_id = await w.engine.restore(entry.trash_id)
+    assert restored_id == "NEW"
+    assert set(w.local.items) == {"NEW"}
+    assert w.local.items["NEW"].password == old.password
+    assert [e.credential for e in w.engine.trash()] == [live]
+    await w.engine.run_once()
+    assert w.remote.items["NEW"].credential.password == old.password
+    assert w.converged()
+
+
+async def test_restoring_a_version_equal_to_its_twin_changes_nothing(w: World) -> None:
+    a = make_credential("A")
+    await synced(w, a)
+    w.local.remove("A")
+    await w.engine.run_once()
+    (entry,) = w.engine.trash()
+    twin = make_credential("B", url=a.url, username=a.username, password=a.password)
+    await synced(w, twin)
+    assert await w.engine.restore(entry.trash_id) == "B"
+    assert w.local.items["B"] == twin
+    assert w.engine.trash() == []
+
+
+async def test_restore_prefers_the_synced_twin(w: World) -> None:
+    synced_twin = make_credential("Z", url="https://x.example", username="u")
+    await synced(w, synced_twin)
+    w.remote.remove("Z")
+    await w.engine.run_once()
+    (entry,) = w.engine.trash()
+    await synced(w, synced_twin)
+    # A second keyring copy made in Seahorse, not in iCloud yet.
+    w.local.put(make_credential("A", url="https://x.example", username="u", password="pw-a"))
+    assert await w.engine.restore(entry.trash_id) == "Z"
+
+
+async def _restore_twin_scenario(w: World) -> tuple[str, Credential]:
+    old = make_credential("OLD", url="https://x.example", password="fake-old")
+    await synced(w, old)
+    w.local.remove("OLD")
+    await w.engine.run_once()
+    (entry,) = w.engine.trash()
+    live = make_credential("NEW", url="https://x.example", password="fake-live")
+    await synced(w, live)
+    return entry.trash_id, live
+
+
+async def test_restore_over_a_twin_keeps_both_versions_when_the_keyring_write_fails(
+    w: World,
+) -> None:
+    entry_id, live = await _restore_twin_scenario(w)
+    w.local.fail_next("upsert", LocalUnavailable("locked mid-restore"))
+    with pytest.raises(LocalUnavailable):
+        await w.engine.restore(entry_id)
+    assert w.local.items["NEW"] == live
+    assert {e.credential.password for e in w.engine.trash()} == {"fake-old", "fake-live"}
+
+
+async def test_restore_keeps_the_displaced_version_when_a_failed_write_landed(
+    w: World,
+) -> None:
+    entry_id, live = await _restore_twin_scenario(w)
+    write = w.local.upsert
+
+    async def write_then_lose_the_reply(credential: Credential) -> None:
+        await write(credential)
+        msg = "reply lost"
+        raise LocalUnavailable(msg)
+
+    w.local.upsert = write_then_lose_the_reply  # type: ignore[method-assign]
+    with pytest.raises(LocalUnavailable):
+        await w.engine.restore(entry_id)
+    assert w.local.items["NEW"].password == "fake-old"
+    assert live in [e.credential for e in w.engine.trash()]
+
+
+async def test_restore_finds_the_twin_icloud_read_back_without_its_default_port(
+    w: World,
+) -> None:
+    w.remote.unique_logins = True
+    winner = make_credential("A", url="https://x.example", username="u")
+    await synced(w, winner)
+    loser = make_credential("A", url="https://x.example:443", username="u", password="fake-l")
+    w.state.add_trash(TrashEntry("T", loser, T0, "conflict"))
+    assert await w.engine.restore("T") == "A"
+    report = await w.engine.run_once()
+    assert report.upload_failures == ()
+    assert list(w.remote.items) == ["A"]
+
+
+async def test_restore_prefers_the_twin_with_the_same_written_port(w: World) -> None:
+    # `https://x.example` and `https://x.example:443` are two keychain logins; restoring a
+    # `:443` version over the portless one would collide with the other on upload.
+    a = make_credential("A", url="https://x.example", username="u")
+    b = make_credential("B", url="https://x.example:443", username="u")
+    await synced(w, a, b)
+    version = make_credential("A", url="https://x.example:443", username="u", password="old")
+    w.state.add_trash(TrashEntry("T", version, T0, "conflict"))
+    assert await w.engine.restore("T") == "B"
+    assert w.local.items["A"] == a
+
+
+async def test_restore_prefers_the_twin_with_the_versions_own_id(w: World) -> None:
+    # iCloud logins differing only in what a Credential drops (a default port, the security
+    # domain) read back with one url: the version must replace its own login, not a lookalike.
+    a = make_credential("A", url="https://x.example", username="u")
+    z = make_credential("Z", url="https://x.example", username="u", password="fake-z")
+    await synced(w, a, z)
+    w.local.put(at(z, 1, password="fake-z-loser"))
+    w.remote.put(at(z, 2, password="fake-z-winner"))
+    await w.engine.run_once()
+    (entry,) = w.engine.trash()
+    assert await w.engine.restore(entry.trash_id) == "Z"
+    assert w.local.items["A"] == a
+
+
+async def test_restoring_the_agreed_version_beats_a_pending_icloud_edit(w: World) -> None:
+    # Base A, keyring B, iCloud C, and A in trash: restoring A must not read as "no keyring
+    # change", which would let C overwrite it unseen.
+    a = make_credential("A", password="fake-a")
+    await synced(w, a)
+    w.state.add_trash(TrashEntry("T", a, T0, "conflict"))
+    b = at(a, 1, password="fake-b")
+    c = at(a, 2, password="fake-c")
+    w.local.put(b)
+    w.remote.put(c)
+    w.clock.advance(hours=1)
+    assert await w.engine.restore("T") == "A"
+    await w.engine.run_once()
+    assert w.local.items["A"].password == "fake-a"
+    assert w.remote.items["A"].credential.password == "fake-a"
+    assert sorted(e.credential.password for e in w.engine.trash()) == ["fake-b", "fake-c"]
+    assert w.converged()
+
+
+async def test_restoring_the_agreed_version_with_icloud_unchanged_uploads_nothing(
+    w: World,
+) -> None:
+    a = make_credential("A", password="fake-a")
+    await synced(w, a)
+    w.state.add_trash(TrashEntry("T", a, T0, "conflict"))
+    w.local.put(at(a, 1, password="fake-b"))
+    await w.engine.restore("T")
+    report = await w.engine.run_once()
+    assert (report.updated_remote, report.conflicts) == (0, 0)
+    assert w.remote.items["A"].credential.password == "fake-a"
+    assert [e.credential.password for e in w.engine.trash()] == ["fake-b"]
+
+
+async def test_a_malformed_live_url_does_not_block_restoring_others(w: World) -> None:
+    old = make_credential("OLD", url="https://x.example")
+    await synced(w, old)
+    w.local.remove("OLD")
+    await w.engine.run_once()
+    (entry,) = w.engine.trash()
+    w.local.put(make_credential("BROKEN", url="https://[broken"))
+    w.local.put(make_credential("LIVE", url="https://x.example", password="fake-live"))
+    assert await w.engine.restore(entry.trash_id) == "LIVE"
+
+
+@pytest.mark.parametrize("url", ["https://x.example/#anchor", "https://user@x.example/"])
+async def test_a_version_icloud_cannot_store_never_replaces_a_live_login(
+    w: World, url: str
+) -> None:
+    live = make_credential("LIVE", url="https://x.example/")
+    await synced(w, live)
+    w.state.add_trash(TrashEntry("T", make_credential("OLD", url=url), T0, "deleted-on-linux"))
+    new_id = await w.engine.restore("T")
+    assert new_id != "LIVE"
+    assert w.local.items["LIVE"] == live
+
+
+async def test_restore_with_a_changed_username_is_a_separate_login(w: World) -> None:
+    w.remote.unique_logins = True
+    a = make_credential("A")
+    await synced(w, a)
+    w.local.put(at(a, 1, password="fake-loser"))
+    w.remote.put(at(a, 2, username="renamed"))
+    await w.engine.run_once()
+    (entry,) = w.engine.trash()
+    new_id = await w.engine.restore(entry.trash_id)
+    assert new_id != "A"
+    await w.engine.run_once()
+    assert w.remote.items["A"].credential.username == "renamed"
     assert w.remote.items[new_id].credential.password == "fake-loser"
 
 
@@ -595,6 +809,207 @@ async def test_skipped_cycle_does_not_record_last_sync(w: World) -> None:
     w.local.lock()
     await w.engine.run_once()
     assert w.state.get(LAST_SYNC_KEY) is None
+
+
+# ---------------------------------------------------------------- items iCloud refuses
+
+
+async def test_an_item_icloud_refuses_does_not_stop_the_others(w: World) -> None:
+    for item_id in ("A", "B", "C"):
+        w.local.put(make_credential(item_id))
+    w.remote.reject("B", "another login for this site and account already exists")
+    report = await w.engine.run_once()
+    assert report.skipped_reason is None
+    assert report.created_remote == 2
+    assert set(w.remote.items) == {"A", "C"}
+    assert w.state.get(LAST_SYNC_KEY) == T0.isoformat()
+    (failure,) = report.upload_failures
+    assert failure == UploadFailure(
+        "B",
+        "https://b.example.com",
+        "user",
+        "another login for this site and account already exists",
+        attempts=1,
+        retry_at=T0 + SyncPolicy().rejected_retry,
+    )
+    assert "B" not in w.state.bases()
+
+
+async def test_a_refused_item_does_not_stop_later_changes(w: World) -> None:
+    w.local.put(make_credential("B"))
+    w.remote.reject("B")
+    await w.engine.run_once()
+    w.local.put(make_credential("LATER"))
+    report = await w.engine.run_once()
+    assert report.skipped_reason is None
+    assert "LATER" in w.remote.items
+
+
+async def test_a_refused_item_is_retried_with_growing_backoff(w: World) -> None:
+    w.local.put(make_credential("B"))
+    w.remote.reject("B")
+    retry = SyncPolicy().rejected_retry
+
+    async def uploads_of_b() -> int:
+        w.remote.calls.clear()
+        report = await w.engine.run_once()
+        assert report.skipped_reason is None
+        assert [f.item_id for f in report.upload_failures] == ["B"]
+        return w.remote.calls.count(("upsert", "B"))
+
+    assert await uploads_of_b() == 1
+    w.clock.advance(seconds=retry.total_seconds() - 1)
+    assert await uploads_of_b() == 0  # still waiting: no hammering every cycle
+    w.clock.advance(seconds=1)
+    assert await uploads_of_b() == 1  # second refusal: the wait doubles
+    w.clock.advance(seconds=retry.total_seconds())
+    assert await uploads_of_b() == 0
+    w.clock.advance(seconds=retry.total_seconds())
+    assert await uploads_of_b() == 1
+    w.remote.accept("B")
+    w.clock.advance(seconds=4 * retry.total_seconds())
+    report = await w.engine.run_once()
+    assert report.created_remote == 1
+    assert report.upload_failures == ()
+    assert w.converged()
+
+
+async def test_backoff_is_capped(w: World) -> None:
+    policy = SyncPolicy(
+        rejected_retry=timedelta(minutes=1), rejected_retry_max=timedelta(minutes=3)
+    )
+    w.engine = w.make_engine(policy)
+    w.local.put(make_credential("B"))
+    w.remote.reject("B")
+    waits = []
+    for _ in range(4):
+        report = await w.engine.run_once()
+        (failure,) = report.upload_failures
+        waits.append(failure.retry_at - w.clock.now)
+        w.clock.now = failure.retry_at
+    assert waits == [timedelta(minutes=m) for m in (1, 2, 3, 3)]
+
+
+async def test_editing_a_refused_item_retries_it_at_once(w: World) -> None:
+    b = make_credential("B")
+    w.local.put(b)
+    w.remote.reject("B")
+    await w.engine.run_once()
+    w.remote.accept("B")
+    w.local.put(at(b, 1, username="someone-else"))
+    report = await w.engine.run_once()
+    assert report.created_remote == 1
+    assert report.upload_failures == ()
+    assert w.remote.items["B"].credential.username == "someone-else"
+
+
+async def test_a_refused_edit_keeps_the_item_linked_and_others_flowing(w: World) -> None:
+    a, b = make_credential("A"), make_credential("B")
+    await synced(w, a, b)
+    w.local.put(at(a, 1, password="fake-a"))
+    w.local.put(at(b, 1, password="fake-b"))
+    w.remote.reject("A")
+    report = await w.engine.run_once()
+    assert report.skipped_reason is None
+    assert report.updated_remote == 1
+    assert w.remote.items["B"].credential.password == "fake-b"
+    assert w.state.bases()["A"].credential == a
+    assert [f.item_id for f in report.upload_failures] == ["A"]
+
+
+async def test_the_retry_schedule_survives_a_restart(w: World) -> None:
+    w.local.put(make_credential("B"))
+    w.remote.reject("B")
+    first = await w.engine.run_once()
+    w.restart()
+    w.remote.calls.clear()
+    report = await w.engine.run_once()
+    assert ("upsert", "B") not in w.remote.calls
+    assert report.upload_failures == first.upload_failures
+
+
+async def test_a_refused_item_that_was_deleted_is_forgotten(w: World) -> None:
+    w.local.put(make_credential("B"))
+    w.remote.reject("B")
+    await w.engine.run_once()
+    w.local.remove("B")
+    report = await w.engine.run_once()
+    assert report.upload_failures == ()
+    w.local.put(make_credential("B"))
+    w.remote.calls.clear()
+    await w.engine.run_once()
+    assert ("upsert", "B") in w.remote.calls  # a fresh start, not the old schedule
+
+
+async def test_the_rejection_hook_fires_once_per_refused_version(w: World) -> None:
+    seen: list[UploadFailure] = []
+    w.engine = SyncEngine(w.remote, w.local, w.state, clock=w.clock, on_upload_rejected=seen.append)
+    b = make_credential("B")
+    w.local.put(b)
+    w.remote.reject("B", "duplicate")
+    await w.engine.run_once()
+    w.clock.advance(days=1)
+    await w.engine.run_once()  # refused again: the user already knows
+    assert [(f.item_id, f.attempts) for f in seen] == [("B", 1)]
+    w.local.put(at(b, 1, password="fake-new"))
+    await w.engine.run_once()  # a new version refused: tell the user again
+    assert [(f.item_id, f.attempts) for f in seen] == [("B", 1), ("B", 1)]
+
+
+async def test_item_rejection_from_a_write_does_not_lose_the_trash_copy(w: World) -> None:
+    a = make_credential("A")
+    await synced(w, a)
+    iphone = at(a, 1, password="fake-iphone")
+    linux = at(a, 2, password="fake-linux")
+    w.remote.put(iphone)
+    w.local.put(linux)
+    w.remote.reject("A")
+    report = await w.engine.run_once()
+    assert report.skipped_reason is None
+    assert [e.credential for e in w.engine.trash()] == [iphone]
+    assert w.local.items["A"] == linux
+
+
+def test_upload_failure_message_names_the_login_and_the_way_out() -> None:
+    one = UploadFailure("B", "https://b.example", "alice", "duplicate", 1, T0)
+    assert upload_failures_message(()) == ""
+    message = upload_failures_message((one,))
+    assert "alice on https://b.example" in message
+    assert "duplicate" in message
+    assert "Everything else is syncing" in message
+    two = upload_failures_message((one, dataclasses.replace(one, item_id="C")))
+    assert two.startswith("iCloud did not accept 2 passwords")
+
+
+async def test_a_refused_restore_of_a_held_deletion_is_kept_and_retried(w: World) -> None:
+    items = [make_credential(f"I{i}") for i in range(6)]
+    await synced(w, *items)
+    for c in items:
+        w.remote.remove(c.id)
+    assert (await w.engine.run_once()).paused is not None
+    w.remote.reject("I0")
+    report = await w.engine.resolve_pause(apply=False)
+    assert report.created_remote == 5
+    assert [f.item_id for f in report.upload_failures] == ["I0"]
+    w.restart()
+    report = await w.engine.run_once()
+    # The user chose to keep it: a refused upload must not turn into a local deletion.
+    assert report.deleted_local == 0
+    assert "I0" in w.local.items
+    assert w.engine.trash() == []
+    w.remote.accept("I0")
+    w.clock.advance(seconds=SyncPolicy().rejected_retry.total_seconds())
+    report = await w.engine.run_once()
+    assert report.created_remote == 1
+    assert w.converged()
+
+
+async def test_item_rejected_is_not_an_outage(w: World) -> None:
+    w.local.put(make_credential("A"))
+    w.remote.fail_next("upsert", ItemRejected("bad url"))
+    report = await w.engine.run_once()
+    assert report.skipped_reason is None
+    assert not isinstance(ItemRejected("x"), RemoteUnavailable)
 
 
 # ---------------------------------------------------------------- S20 restart

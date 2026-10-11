@@ -15,7 +15,7 @@ import re
 from dataclasses import dataclass
 from enum import StrEnum, auto
 from typing import TYPE_CHECKING
-from urllib.parse import urlsplit
+from urllib.parse import SplitResult, urlsplit
 
 import idna
 from publicsuffixlist import PublicSuffixList
@@ -219,6 +219,43 @@ def link_host(raw_url: str) -> str:
         return _strip_www(_parse(raw_url).host)
     except ValueError:
         return ""
+
+
+type LoginIdentity = tuple[str, str, str, int, str]
+
+_KEYCHAIN_DEFAULT_PORTS = {"https": 443, "http": 80, "ftp": 21}
+
+
+def login_identity(c: Credential, *, exact_port: bool = False) -> LoginIdentity | None:
+    """Return what makes two logins "the same login" in iCloud Keychain (it keeps one of each).
+
+    Follows the keychain's key for a website login: host and username (both compared
+    case-insensitively), scheme, port, and path with query. A scheme's default port counts as
+    no port, because a login read back from iCloud loses it: telling `:443` apart would miss
+    the very login a new save would collide with. Being coarser than the keychain (which also
+    keys on security domain and authentication type) only ever finds extra matches, never
+    misses one. None when the url is not a website address the keychain could store (as its
+    writer decides: no fragment, no user information), so such a login is nobody's twin.
+    `exact_port` keeps a written default port, to tell such near-twins apart.
+    """
+    try:
+        parts = urlsplit(c.url)
+        port = parts.port or 0
+    except ValueError:
+        return None
+    scheme = parts.scheme.lower()
+    host = parts.hostname
+    if scheme not in _KEYCHAIN_DEFAULT_PORTS or not host or not _storable(parts):
+        return None
+    if port == _KEYCHAIN_DEFAULT_PORTS[scheme] and not exact_port:
+        port = 0
+    path = parts.path + ("?" + parts.query if parts.query else "")
+    return (host.lower(), c.username.lower(), scheme, port, path)
+
+
+def _storable(parts: SplitResult) -> bool:
+    """Whether the keychain can hold the url: it has no place for a fragment or user info."""
+    return not parts.fragment and parts.username is None and parts.password is None
 
 
 def _same_origin_rules_allow(page: _Url, cred: _Url) -> bool:
