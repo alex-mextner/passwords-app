@@ -16,7 +16,7 @@ from gi.repository import Gdk, GLib
 if TYPE_CHECKING:
     from collections.abc import Callable
 
-SECRET_HINT_MIME = "x-kde-passwordManagerHint"  # noqa: S105 - a MIME type name, not a secret
+SECRET_HINT_MIME = "x-kde-passwordManagerHint"  # noqa: S105  # nosec B105 - a MIME type name
 
 
 class ClipboardGuard:

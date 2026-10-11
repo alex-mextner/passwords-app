@@ -7,7 +7,7 @@ from __future__ import annotations
 import contextlib
 import os
 import shutil
-import subprocess
+import subprocess  # nosec B404 - runs glib-compile-schemas on our own files only
 import time
 from pathlib import Path
 from typing import TYPE_CHECKING, ClassVar, override
@@ -59,7 +59,7 @@ def settings_schema_source() -> Gio.SettingsSchemaSource | None:
             return None
         target = Path(GLib.get_user_cache_dir()) / "passwords-app" / "schemas"
         target.mkdir(parents=True, exist_ok=True)
-        subprocess.run(  # noqa: S603 - fixed tool, our own files
+        subprocess.run(  # noqa: S603  # nosec B603 - fixed tool, our own files
             [compiler, "--strict", f"--targetdir={target}", str(source)], check=True
         )
         directory = str(target)
@@ -250,7 +250,9 @@ class PasswordsApplication(Adw.Application):
 
     def ensure_window(self) -> MainWindow:
         if self.window is None:
-            assert self.vault is not None  # noqa: S101 - set in startup
+            if self.vault is None:
+                msg = "ensure_window() called before startup created the vault"
+                raise RuntimeError(msg)
             kwargs = {} if self._now is None else {"now": self._now}
             self.window = MainWindow(
                 self, self.vault, self.settings, authorizer=self._authorizer, **kwargs

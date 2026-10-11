@@ -165,7 +165,7 @@ class FakeDaemon(ServiceInterface):
         self.sync_interval = timedelta(minutes=15)
         self.require_2fa = True
         # Fictional credentials the fake accepts; never real ones.
-        self.apple_password = "correct-horse"  # noqa: S105
+        self.apple_password = "correct-horse"
         self.verification_code = "123456"
         self.device_passcode = "000000"
         self.recovery_devices: list[tuple[str, str, str, str]] = list(_DEFAULT_RECOVERY_DEVICES)

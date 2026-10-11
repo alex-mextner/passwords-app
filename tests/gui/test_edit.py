@@ -54,7 +54,7 @@ def test_save_updates_the_daemon_and_the_view(app: support.AppUnderTest) -> None
     stored = app.call(lambda d: d.items[item.id])
     assert stored.title == "Northwind Webmail"
     assert stored.username == "a.doe@example.com"
-    assert stored.password == "brand-New-passw0rd-2026"  # noqa: S105 - fictional test value
+    assert stored.password == "brand-New-passw0rd-2026"
     support.wait_until(lambda: "Northwind Webmail" in app.titles(), what="renamed in list")
     support.wait_until(
         lambda: app.window.detail.title_label.get_text() == "Northwind Webmail",

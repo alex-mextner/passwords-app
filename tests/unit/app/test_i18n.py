@@ -189,7 +189,9 @@ def test_no_fuzzy_or_untranslated_entries() -> None:
 
 def test_header() -> None:
     text = RU_PO.read_text(encoding="utf-8")
+    # REUSE-IgnoreStart - asserts the catalog's header; not this file's own license tag
     assert "SPDX-License-Identifier: MIT" in text
+    # REUSE-IgnoreEnd
     assert "Language: ru\\n" in text
     assert "charset=UTF-8" in text
     assert "Project-Id-Version: passwords-app 0.1.0" in text

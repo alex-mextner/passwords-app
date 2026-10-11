@@ -181,6 +181,8 @@ min_confidence = 80
 
 [tool.deptry]
 known_first_party = ["passwords_app"]
+# The root conftest.py is test infrastructure like tests/ (excluded by default).
+extend_exclude = ["conftest\\.py"]
 
 [tool.deptry.per_rule_ignores]
 DEP001 = ["gi"]

@@ -6,7 +6,7 @@ from __future__ import annotations
 
 import math
 import time
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Protocol
 
 from gi.repository import Gdk, Gio, GLib, Gtk
 
@@ -17,9 +17,21 @@ from passwords_app.app.security import Level, level_fraction, level_text
 if TYPE_CHECKING:
     from collections.abc import Callable
 
-    import cairo
-
     from passwords_app.app.records import Item
+
+
+class Pen(Protocol):
+    """The part of cairo.Context the ring draws with.
+
+    pycairo ships with python3-gi-cairo, which only the GUI runtime installs; typing against
+    this protocol keeps the module checkable without it, and cairo.Context satisfies it.
+    """
+
+    def set_line_width(self, width: float) -> None: ...
+    def set_source_rgb(self, red: float, green: float, blue: float) -> None: ...
+    def set_source_rgba(self, red: float, green: float, blue: float, alpha: float) -> None: ...
+    def arc(self, xc: float, yc: float, radius: float, angle1: float, angle2: float) -> None: ...
+    def stroke(self) -> None: ...
 
 
 class MonogramTile(Gtk.Stack):
@@ -117,9 +129,7 @@ class CountdownRing(Gtk.DrawingArea):
         self.queue_draw()
         return True
 
-    def _draw(
-        self, _area: Gtk.DrawingArea, cr: cairo.Context[cairo.Surface], w: int, h: int
-    ) -> None:
+    def _draw(self, _area: Gtk.DrawingArea, cr: Pen, w: int, h: int) -> None:
         fraction = codes.ring_fraction(self.seconds_left, self._period)
         radius = min(w, h) / 2 - 2
         cx, cy = w / 2, h / 2

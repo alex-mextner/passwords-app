@@ -699,13 +699,17 @@ class MainWindow(Adw.ApplicationWindow):
         target = self.pending_select or (shown.id if shown is not None else None)
         self.pending_select = None
         if target and self.list_page.select_id(target):
-            obj = self.vault.find(target)
-            stale = shown is not None and obj is not None and obj.item.modified != shown.modified
-            if stale and not self.detail.editing:
-                self.detail.show_item(target)  # edited on another device
+            self._refresh_if_stale(target, shown)
             return
         if self.selected_item() is None and self.list_page.section.kind is not Kind.DELETED:
             self.detail.show_item(None)
+
+    def _refresh_if_stale(self, target: str, shown: Item | None) -> None:
+        """Reload the detail when the selected item was edited on another device."""
+        obj = self.vault.find(target)
+        stale = shown is not None and obj is not None and obj.item.modified != shown.modified
+        if stale and not self.detail.editing:
+            self.detail.show_item(target)
 
     def _on_failed(self, _vault: Vault, message: str) -> None:
         if message:

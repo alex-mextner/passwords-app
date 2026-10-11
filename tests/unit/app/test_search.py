@@ -66,11 +66,11 @@ def test_haystack_contains_every_searchable_field() -> None:
             url="https://www.Exämple.com/login",
             title="Mon Café",
             username="Jane@Example.com",
-            notes="Bürö",
+            notes="Zürich Hauptbahnhof",
             alt_urls=("https://Other.example.org",),
         )
     )
-    for needle in ("mon cafe", "jane@example.com", "buro", "other.example.org", "/login"):
+    for needle in ("mon cafe", "jane@example.com", "zurich", "other.example.org", "/login"):
         assert needle in hay
 
 

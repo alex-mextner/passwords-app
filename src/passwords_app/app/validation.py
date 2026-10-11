@@ -32,7 +32,7 @@ _SCHEME = re.compile(r"[A-Za-z][A-Za-z0-9+.-]*://")
 class Field(StrEnum):
     URL = "url"
     USERNAME = "username"
-    PASSWORD = "password"  # noqa: S105 - a field name, not a secret
+    PASSWORD = "password"  # noqa: S105  # nosec B105 - a field name, not a secret
     TITLE = "title"
     NOTES = "notes"
     OTPAUTH = "otpauth"
@@ -49,12 +49,8 @@ class Validation:
         return not self.errors
 
 
-def _web_url(text: str) -> str:
-    """Return the normalized http(s) URL; ValueError with a user-facing message otherwise."""
-    stripped = text.strip()
-    if not stripped:
-        raise ValueError(_("Enter a website"))
-    explicit = _SCHEME.match(stripped) is not None
+def _normalized_web_url(stripped: str, *, explicit: bool) -> str:
+    """Return the canonical http(s) form; ValueError with a user-facing message otherwise."""
     scheme = urlsplit(stripped).scheme.lower() if explicit else "https"
     if scheme not in {"http", "https"}:
         raise ValueError(_("Use a web address such as example.com"))
@@ -65,6 +61,16 @@ def _web_url(text: str) -> str:
     # The parser also accepts forms without "//" (`file:\\host\share`); only the result tells.
     if urlsplit(normalized).scheme not in {"http", "https"}:
         raise ValueError(_("Use a web address such as example.com"))
+    return normalized
+
+
+def _web_url(text: str) -> str:
+    """Return the normalized http(s) URL; ValueError with a user-facing message otherwise."""
+    stripped = text.strip()
+    if not stripped:
+        raise ValueError(_("Enter a website"))
+    explicit = _SCHEME.match(stripped) is not None
+    normalized = _normalized_web_url(stripped, explicit=explicit)
     # The canonical form drops the query and fragment, but they are part of where the login
     # page is (`/#/login`, a tenant parameter); keep them so saving never moves the link.
     original = urlsplit(stripped if explicit else f"https://{stripped}")

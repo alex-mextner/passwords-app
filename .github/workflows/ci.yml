@@ -200,7 +200,7 @@ jobs:
           apt-packages: >-
             gnome-shell mutter gsettings-desktop-schemas at-spi2-core xdg-desktop-portal
             dbus-daemon gnome-keyring pipewire wireplumber gstreamer1.0-pipewire
-            gstreamer1.0-plugins-base gstreamer1.0-plugins-good ffmpeg
+            gstreamer1.0-plugins-base gstreamer1.0-plugins-good ffmpeg gettext
             libgl1-mesa-dri libegl-mesa0 libglx-mesa0 fonts-cantarell fonts-dejavu-core
             adwaita-icon-theme python3-gi-cairo ${{ env.GI_PACKAGES }}
       - name: Check

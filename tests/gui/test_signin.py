@@ -24,7 +24,7 @@ def _wizard(app: support.AppUnderTest) -> Any:
     return support.wait_until(lambda: app.window.sign_in_dialog, what="wizard")
 
 
-def _account(dialog: Any, password: str = "correct-horse") -> None:  # noqa: S107 - the fake's fictional password
+def _account(dialog: Any, password: str = "correct-horse") -> None:
     dialog.apple_id.set_text("alex.doe@example.com")
     dialog.password.set_text(password)
     dialog.continue_button.emit("clicked")

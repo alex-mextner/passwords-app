@@ -166,7 +166,7 @@ def pause_title(status: Status) -> str:
 
 
 class Copied(StrEnum):
-    PASSWORD = "password"  # noqa: S105 - a kind of value, not a secret
+    PASSWORD = "password"  # noqa: S105  # nosec B105 - a kind of value, not a secret
     USERNAME = "username"
     CODE = "code"
 

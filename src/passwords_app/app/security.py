@@ -98,22 +98,34 @@ def _as_credential(item: Item) -> Credential:
     )
 
 
+def _reuse_groups(with_password: list[Item]) -> dict[str, tuple[str, ...]]:
+    """For every item sharing its password, the ids of the other items sharing it."""
+    reused_with: dict[str, tuple[str, ...]] = {}
+    for ids in reused(_as_credential(i) for i in with_password).values():
+        for item_id in ids:
+            reused_with[item_id] = tuple(other for other in ids if other != item_id)
+    return reused_with
+
+
+def _own_issues(item: Item, pwned: set[str]) -> set[Issue]:
+    """Find the issues the item decides alone: a weak or a leaked password."""
+    found: set[Issue] = set()
+    user_inputs = [u for u in (item.username, item.host) if u]
+    if assess(item.password or "", user_inputs=user_inputs).weak:
+        found.add(Issue.WEAK)
+    if item.id in pwned:
+        found.add(Issue.COMPROMISED)
+    return found
+
+
 def analyze(items: Iterable[Item], compromised: Iterable[str] = ()) -> Report:
     """Classify items that carry a password (fetched with Get); others are skipped."""
     with_password = [i for i in items if i.password]
     pwned = set(compromised)
-    issues: dict[str, set[Issue]] = {i.id: set() for i in with_password}
-    reused_with: dict[str, tuple[str, ...]] = {}
-    for ids in reused(_as_credential(i) for i in with_password).values():
-        for item_id in ids:
-            issues[item_id].add(Issue.REUSED)
-            reused_with[item_id] = tuple(other for other in ids if other != item_id)
-    for item in with_password:
-        password = item.password or ""
-        if assess(password, user_inputs=[u for u in (item.username, item.host) if u]).weak:
-            issues[item.id].add(Issue.WEAK)
-        if item.id in pwned:
-            issues[item.id].add(Issue.COMPROMISED)
+    reused_with = _reuse_groups(with_password)
+    issues = {i.id: _own_issues(i, pwned) for i in with_password}
+    for item_id in reused_with:
+        issues[item_id].add(Issue.REUSED)
     return Report(
         issues={k: frozenset(v) for k, v in issues.items()},
         reused_with=reused_with,
@@ -134,6 +146,7 @@ def issue_text(issue: Issue, reused_count: int = 0) -> str:
 def hibp_split(password: str) -> tuple[str, str]:
     """(prefix sent to the API, suffix kept local) of the uppercase SHA-1 hex digest."""
     # SHA-1 is what the HIBP range API is keyed by; it is not used for security here.
+    # nosemgrep: insecure-hash-algorithm-sha1 - HIBP's k-anonymity range API is SHA-1 by protocol
     digest = hashlib.sha1(password.encode(), usedforsecurity=False).hexdigest().upper()
     return digest[:_PREFIX_LEN], digest[_PREFIX_LEN:]
 
