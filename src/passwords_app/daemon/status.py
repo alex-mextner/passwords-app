@@ -15,6 +15,7 @@ from dbus_fast import Variant
 
 from passwords_app.daemon.items import to_ms
 from passwords_app.sync.engine import SKIP_AUTH, SKIP_LOCAL, SKIP_REMOTE
+from passwords_app.sync.ports import upload_failures_message
 
 if TYPE_CHECKING:
     from datetime import datetime
@@ -78,4 +79,5 @@ def outcome(report: SyncReport) -> tuple[SyncState, str]:
             return "error", "Sync was skipped."
     if report.paused is not None:
         return "paused", paused_message(report.paused)
-    return "idle", ""
+    # Logins iCloud refused wait alone while everything else syncs: not an outage.
+    return "idle", upload_failures_message(report.upload_failures)

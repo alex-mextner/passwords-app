@@ -20,7 +20,7 @@ import requests
 from passwords_app.icloud.account import SignInRequired
 from passwords_app.icloud.errors import AppleError
 from passwords_app.icloud.keychain.client import RecordConflictError
-from passwords_app.icloud.passwords import UnsupportedCredentialError
+from passwords_app.icloud.passwords import DuplicateLoginError, UnsupportedCredentialError
 from passwords_app.icloud.transport.cloudkit import CloudKitError
 from passwords_app.sync.ports import (
     AuthRequired,
@@ -38,6 +38,10 @@ if TYPE_CHECKING:
     from passwords_app.icloud.keychain.client import StoredLogin
 
 logger = logging.getLogger(__name__)
+
+# Shown to the person as is (daemon status and notification, which name the site and
+# username themselves): Apple's keychain holds one login per website and username.
+DUPLICATE_LOGIN = "another password for this website and username already exists"
 
 
 class Keychain(Protocol):
@@ -111,5 +115,7 @@ def _translate(error: Exception, *, saving: bool) -> Exception:
         # Only a save can be refused for the login itself (a non-web address, another login
         # with the same site and account): that is this item's problem, not an outage, so the
         # engine sets it aside and keeps syncing the rest.
-        return ItemRejected(msg) if saving else RemoteUnavailable(msg)
+        if not saving:
+            return RemoteUnavailable(msg)
+        return ItemRejected(DUPLICATE_LOGIN if isinstance(error, DuplicateLoginError) else msg)
     return RemoteUnavailable(str(error) or type(error).__name__)

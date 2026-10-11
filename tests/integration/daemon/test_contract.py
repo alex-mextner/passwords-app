@@ -15,6 +15,7 @@ from tests.integration.daemon.support import CallError, Client, RunningDaemon, w
 from tests.unit.daemon.otp_fixtures import RFC_SEED, otpauth_uri
 
 from passwords_app.daemon import BUS_NAME, INTERFACE, OBJECT_PATH
+from passwords_app.sync.remote_icloud import DUPLICATE_LOGIN
 
 if TYPE_CHECKING:
     from dbus_fast.aio import MessageBus
@@ -447,3 +448,35 @@ async def test_offline_status(client: Client, running: RunningDaemon) -> None:
     running.remote.offline = True
     await client.call("SyncNow")
     assert (await client.one("GetStatus"))["state"].value == "offline"
+
+
+async def test_a_login_icloud_refuses_is_explained_in_the_status(
+    client: Client, running: RunningDaemon
+) -> None:
+    # The contract has no per-item flag: the status message and a notification carry it.
+    running.remote.reject("R", DUPLICATE_LOGIN)
+    running.local.put(make_credential("R", url="https://example.com", username="bob"))
+    await client.call("SyncNow")
+    status = await client.one("GetStatus")
+    assert status["state"].value == "idle"
+    message = status["message"].value
+    assert message.startswith(
+        f"iCloud did not accept the password for bob on https://example.com: {DUPLICATE_LOGIN}."
+    )
+    await wait_for(lambda: client.signal_bodies("StatusChanged")[-1]["message"].value == message)
+    assert running.notifier.topics() == ["refused:R"]
+    item = await client.one("Get", "s", "R")
+    assert set(item) == {
+        "id",
+        "url",
+        "username",
+        "title",
+        "notes",
+        "alt_urls",
+        "group",
+        "created",
+        "modified",
+        "has_code",
+        "password",
+        "otpauth",
+    }
