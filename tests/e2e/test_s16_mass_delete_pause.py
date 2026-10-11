@@ -59,6 +59,7 @@ def test_s16_mass_delete_on_iphone_pauses_then_apply_deletes_into_trash(
     assert app.status_title() == "Sync Paused"
     # Several cycles later still nothing is deleted on Linux.
     stays(lambda: all(stack.keyring.by_id(c.id) for c in bulk), seconds=5, what="keyring intact")
+    wait_until(lambda: app.status_title() == "Sync Paused", what="the header saying paused")
     capture_app(app, SCENARIO)
 
     app.resolve_pause("apply")
