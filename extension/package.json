@@ -1,0 +1,38 @@
+{
+  "name": "passwords-app-extension",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Autofill and save for passwords-app (iCloud Keychain on Linux) in Firefox and Chrome",
+  "license": "MIT",
+  "type": "module",
+  "scripts": {
+    "build": "bun scripts/build.ts",
+    "test": "bun test",
+    "typecheck": "tsc --noEmit -p tsconfig.json",
+    "lint": "eslint --max-warnings 0 .",
+    "format": "prettier --write .",
+    "format:check": "prettier --check .",
+    "lint:firefox": "web-ext lint --source-dir dist/firefox --self-hosted"
+  },
+  "dependencies": {
+    "tldts": "^7.4.18"
+  },
+  "devDependencies": {
+    "@eslint/js": "^10.0.1",
+    "@happy-dom/global-registrator": "^20.14.6",
+    "@types/bun": "^1.4.2",
+    "@types/chrome": "^0.3.5",
+    "eslint": "^10.12.0",
+    "eslint-plugin-no-unsanitized": "^4.1.5",
+    "eslint-plugin-security": "^4.2.0",
+    "globals": "^17.13.0",
+    "happy-dom": "^20.14.6",
+    "prettier": "^3.9.10",
+    "typescript": "~6.0.3",
+    "typescript-eslint": "^8.71.1",
+    "web-ext": "^10.7.0"
+  },
+  "comments": {
+    "typescript": "~6.0: typescript-eslint 8.x supports TypeScript < 6.1; TypeScript 7 (native) has no JS API yet"
+  }
+}
