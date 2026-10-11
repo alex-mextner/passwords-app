@@ -165,8 +165,10 @@ class Vault(GObject.Object):
                     obj.issues = old.issues
                 objects.append(obj)
         self._by_id = {o.item.id: o for o in objects}
-        self.items.splice(0, self.items.get_n_items(), objects)
+        # Before the splice: the store's items-changed is what the list page redraws from,
+        # and it must already see the vault loaded or it stays on the spinner.
         self.loaded = True
+        self.items.splice(0, self.items.get_n_items(), objects)
         self.emit("items-changed")
         self.schedule_scan()
 

@@ -271,6 +271,23 @@ def test_initial_load_fills_the_stores(vault: Vault, fake: FakeDaemonThread) -> 
     assert vault.count_group("Nobody") == 0
 
 
+def test_store_items_changed_sees_the_vault_loaded(
+    connection: Gio.DBusConnection, fake: FakeDaemonThread
+) -> None:
+    # The list page re-evaluates its spinner from the store's items-changed; a vault still
+    # reporting "not loaded" at that moment leaves the list on the spinner for good.
+    del fake  # only needed running
+    v = make_vault(connection)
+    loaded_at_change: list[bool] = []
+    v.items.connect("items-changed", lambda *_a: loaded_at_change.append(v.loaded))
+    v.start()
+    try:
+        wait_until(lambda: bool(loaded_at_change), what="first items-changed")
+        assert loaded_at_change[0] is True
+    finally:
+        v.stop()
+
+
 def test_lookups(vault: Vault) -> None:
     first = vault.items.get_item(3)
     assert first is not None
