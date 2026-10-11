@@ -176,21 +176,40 @@ class SyncEngine:
                 await self._apply(copy, now, counts)
         with self._state.transaction():
             for action in writes:
-                try:
-                    await self._apply(action, now, counts)
-                except ConflictError:
-                    # The planner puts an item's iCloud write last in its group, so a lost
-                    # race leaves nothing of that item pending; the next cycle re-plans it.
-                    continue
-                except LocalUnavailable:
-                    return counts, SKIP_LOCAL
-                except AuthRequired:
-                    return counts, SKIP_AUTH
-                except RemoteUnavailable:
-                    return counts, SKIP_REMOTE
+                skip = await self._apply_write(action, now, counts)
+                if skip is not None:
+                    return counts, skip
         return counts, None
 
-    async def _apply(self, action: Action, now: datetime, counts: Counter[str]) -> None:  # noqa: C901, PLR0912 - one arm per action type
+    async def _apply_write(self, action: Action, now: datetime, counts: Counter[str]) -> str | None:
+        """Apply one store write; return the skip reason that ends the cycle, if any."""
+        try:
+            await self._apply(action, now, counts)
+        except ConflictError:
+            # The planner puts an item's iCloud write last in its group, so a lost
+            # race leaves nothing of that item pending; the next cycle re-plans it.
+            return None
+        except LocalUnavailable:
+            return SKIP_LOCAL
+        except AuthRequired:
+            return SKIP_AUTH
+        except RemoteUnavailable:
+            return SKIP_REMOTE
+        return None
+
+    async def _apply(self, action: Action, now: datetime, counts: Counter[str]) -> None:
+        match action:
+            case Trash() | CreateLocal() | UpdateLocal() | DeleteLocal() | ForkLocal():
+                await self._apply_local(action, now, counts)
+            case _:
+                await self._apply_remote(action, counts)
+
+    async def _apply_local(
+        self,
+        action: Trash | CreateLocal | UpdateLocal | DeleteLocal | ForkLocal,
+        now: datetime,
+        counts: Counter[str],
+    ) -> None:
         state = self._state
         match action:
             case Trash(credential, reason):
@@ -212,6 +231,16 @@ class SyncEngine:
             case ForkLocal(credential, _):
                 await self._local.upsert(credential)
                 counts["created_local"] += 1
+            case _:
+                assert_never(action)
+
+    async def _apply_remote(
+        self,
+        action: CreateRemote | UpdateRemote | DeleteRemote | Link | SetBase | DropBase,
+        counts: Counter[str],
+    ) -> None:
+        state = self._state
+        match action:
             case CreateRemote(credential):
                 etag = await self._remote.upsert(credential, None)
                 state.set_base(BaseEntry(credential, etag))

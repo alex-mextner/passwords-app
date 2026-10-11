@@ -14,7 +14,7 @@ import math
 import re
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Literal
-from urllib.parse import parse_qsl, unquote, urlsplit
+from urllib.parse import SplitResult, parse_qsl, unquote, urlsplit
 
 if TYPE_CHECKING:
     from datetime import datetime
@@ -90,8 +90,7 @@ def _algorithm(params: dict[str, str]) -> Algorithm:
     raise OtpError(msg)
 
 
-def parse_otpauth(uri: str) -> OtpParams:
-    """Parse `otpauth://totp/[Issuer:]account?secret=...`; raises OtpError on anything else."""
+def _split_totp_uri(uri: str) -> SplitResult:
     try:
         parts = urlsplit(uri)
     except ValueError:
@@ -103,9 +102,12 @@ def parse_otpauth(uri: str) -> OtpParams:
     if parts.netloc.lower() != "totp":
         msg = "only totp is supported"
         raise OtpError(msg)
+    return parts
 
+
+def _query_params(query: str) -> dict[str, str]:
     params: dict[str, str] = {}
-    for key, value in parse_qsl(parts.query, keep_blank_values=True):
+    for key, value in parse_qsl(query, keep_blank_values=True):
         name = key.lower()
         if name in params:
             msg = f"duplicate parameter {name!r}"
@@ -114,6 +116,13 @@ def parse_otpauth(uri: str) -> OtpParams:
     if "secret" not in params:
         msg = "secret is missing"
         raise OtpError(msg)
+    return params
+
+
+def parse_otpauth(uri: str) -> OtpParams:
+    """Parse `otpauth://totp/[Issuer:]account?secret=...`; raises OtpError on anything else."""
+    parts = _split_totp_uri(uri)
+    params = _query_params(parts.query)
 
     label = unquote(parts.path.removeprefix("/"))
     label_issuer, sep, account = label.partition(":")

@@ -237,15 +237,12 @@ def _link_key(c: Credential) -> tuple[str, str, str] | None:
     return (host, c.username, c.password) if host else None
 
 
-def _link_pairs(
+def _remote_candidates(
     base: Mapping[str, BaseEntry],
     remote: Mapping[str, RemoteItem],
     local: Mapping[str, Credential],
-) -> list[tuple[str, str]]:
-    """Pair unsynced local items with unsynced remote items describing the same login."""
-    local_new = sorted(i for i in local if i not in base and i not in remote)
-    if not local_new:
-        return []
+) -> dict[tuple[str, str, str], deque[str]]:
+    """Unsynced remote item ids by link key, in id order."""
     candidates: dict[tuple[str, str, str], deque[str]] = {}
     for rid in sorted(remote):
         if rid in base:
@@ -260,6 +257,19 @@ def _link_pairs(
         key = _link_key(remote[rid].credential)
         if key is not None:
             candidates.setdefault(key, deque()).append(rid)
+    return candidates
+
+
+def _link_pairs(
+    base: Mapping[str, BaseEntry],
+    remote: Mapping[str, RemoteItem],
+    local: Mapping[str, Credential],
+) -> list[tuple[str, str]]:
+    """Pair unsynced local items with unsynced remote items describing the same login."""
+    local_new = sorted(i for i in local if i not in base and i not in remote)
+    if not local_new:
+        return []
+    candidates = _remote_candidates(base, remote, local)
     if not candidates:
         return []
     pairs: list[tuple[str, str]] = []
@@ -269,6 +279,18 @@ def _link_pairs(
         if matches:
             pairs.append((lid, matches.popleft()))
     return pairs
+
+
+def _too_many(policy: SyncPolicy, count: int, items: int) -> bool:
+    return count > max(policy.mass_delete_min, policy.mass_delete_ratio * items)
+
+
+def _keyring_writes_first(groups: list[tuple[Action, ...]]) -> tuple[Action, ...]:
+    # Keyring writes cannot be conditional, so they run before any iCloud round trip
+    # that would widen the window for overwriting a user's fresh edit unseen. The sort
+    # is stable and moves whole groups, so dependencies inside a group are kept.
+    groups.sort(key=lambda group: not any(isinstance(a, _KEYRING_WRITES) for a in group))
+    return tuple(a for group in groups for a in group)
 
 
 class _Planner:
@@ -397,39 +419,42 @@ class _Planner:
             # Ties go to iCloud: it is the copy every other device already sees.
             self.emit(item_id, Trash(loc, "conflict"), UpdateLocal(item.credential, item.etag))
 
+    def _deleting(self, side: _Side, approved: frozenset[str]) -> list[str]:
+        """Ids of this side's deletion groups that the user has not approved."""
+        return [i for _, s, i in self.groups if s == side and i not in approved]
+
+    def _holds(
+        self,
+        policy: SyncPolicy,
+        held: PendingDeletions | None,
+        local_ids: list[str],
+        remote_ids: list[str],
+    ) -> tuple[list[str], list[str]]:
+        if _too_many(policy, len(local_ids), len(self.local)) or _too_many(
+            policy, len(remote_ids), len(self.remote)
+        ):
+            return local_ids, remote_ids
+        if held is not None:
+            was_local, was_remote = frozenset(held.local_ids), frozenset(held.remote_ids)
+            return [i for i in local_ids if i in was_local], [
+                i for i in remote_ids if i in was_remote
+            ]
+        return [], []
+
     def guarded(self, policy: SyncPolicy, held: PendingDeletions | None) -> SyncPlan:
         """Flatten the groups, holding unapproved deletions when there are too many.
 
         Deletions held by an earlier, still unanswered pause stay held whatever the count
         is now: only the user releases them, even if some of the items came back meanwhile.
         """
-        local_ids = [
-            i for _, side, i in self.groups if side == "local" and i not in self.approved_local
-        ]
-        remote_ids = [
-            i for _, side, i in self.groups if side == "remote" and i not in self.approved_remote
-        ]
-
-        def too_many(count: int, items: int) -> bool:
-            return count > max(policy.mass_delete_min, policy.mass_delete_ratio * items)
-
-        if too_many(len(local_ids), len(self.local)) or too_many(len(remote_ids), len(self.remote)):
-            hold_local, hold_remote = local_ids, remote_ids
-        elif held is not None:
-            was_local, was_remote = frozenset(held.local_ids), frozenset(held.remote_ids)
-            hold_local = [i for i in local_ids if i in was_local]
-            hold_remote = [i for i in remote_ids if i in was_remote]
-        else:
-            hold_local, hold_remote = [], []
+        local_ids = self._deleting("local", self.approved_local)
+        remote_ids = self._deleting("remote", self.approved_remote)
+        hold_local, hold_remote = self._holds(policy, held, local_ids, remote_ids)
         hold = {("local", i) for i in hold_local} | {("remote", i) for i in hold_remote}
         kept = [
             g for g, side, item_id in self.groups if side is None or (side, item_id) not in hold
         ]
-        # Keyring writes cannot be conditional, so they run before any iCloud round trip
-        # that would widen the window for overwriting a user's fresh edit unseen. The sort
-        # is stable and moves whole groups, so dependencies inside a group are kept.
-        kept.sort(key=lambda group: not any(isinstance(a, _KEYRING_WRITES) for a in group))
-        actions = tuple(a for group in kept for a in group)
+        actions = _keyring_writes_first(kept)
         if not hold:
             return SyncPlan(actions)
         return SyncPlan(actions, PendingDeletions(tuple(hold_local), tuple(hold_remote)))

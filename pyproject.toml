@@ -176,16 +176,12 @@ ignore-words-list = "acct,ser,srvr,ptcl,sdmn,agrp,unparseable"
 paths = ["src"]
 min_confidence = 80
 exclude = ["src/passwords_app/icloud/"]  # TEMPORARY (#50)
-# TEMPORARY: parameters of the RemoteStore/LocalStore protocol stubs in sync/ports.py, unused
-# until feat/sync (#1) lands their implementations; that PR deletes this line.
-ignore_names = ["credential", "etag", "item_id"]
 
 [tool.deptry]
 known_first_party = ["passwords_app"]
 
 [tool.deptry.per_rule_ignores]
 DEP001 = ["gi"]
-# TEMPORARY: declared ahead of their first importers, feat/sync (#1: publicsuffixlist, zxcvbn)
-# and feat/keyring (#6: dbus-fast); each PR deletes its entries when it lands.
-DEP002 = ["dbus-fast", "publicsuffixlist", "zxcvbn"]
+# TEMPORARY: declared ahead of its first importer, feat/keyring (#6), which deletes this entry.
+DEP002 = ["dbus-fast"]
 DEP003 = ["urllib3"]  # TEMPORARY (#50): imported only by the legacy icloud client

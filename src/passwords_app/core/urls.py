@@ -79,6 +79,32 @@ def _ascii_label(label: str) -> str:
     return ascii_label
 
 
+def _ipv6_host(bare: str) -> str:
+    try:
+        return ipaddress.IPv6Address(bare).compressed
+    except ValueError as exc:
+        msg = "invalid URL: bad IPv6 literal"
+        raise ValueError(msg) from exc
+
+
+def _host_labels(bare: str) -> list[str]:
+    labels = _DOTS.split(bare)
+    if len(labels) > 1 and labels[-1] == "":
+        labels.pop()  # one trailing dot denotes the root, not an empty label
+    if not labels or "" in labels:
+        msg = "invalid URL: empty host label"
+        raise ValueError(msg)
+    return [_ascii_label(label) for label in labels]
+
+
+def _ipv4_host(name: str) -> str:
+    try:
+        return str(ipaddress.IPv4Address(name))
+    except ValueError as exc:
+        msg = "invalid URL: bad IPv4 literal"
+        raise ValueError(msg) from exc
+
+
 def _normalize_host(host: str) -> tuple[str, bool]:
     """Return (canonical host, is IP literal). IPv6 comes back without brackets."""
     if _CONTROL.search(host):
@@ -86,31 +112,39 @@ def _normalize_host(host: str) -> tuple[str, bool]:
         raise ValueError(msg)
     bare = host[1:-1] if host.startswith("[") and host.endswith("]") else host
     if ":" in bare:
-        try:
-            return ipaddress.IPv6Address(bare).compressed, True
-        except ValueError as exc:
-            msg = "invalid URL: bad IPv6 literal"
-            raise ValueError(msg) from exc
-    labels = _DOTS.split(bare)
-    if len(labels) > 1 and labels[-1] == "":
-        labels.pop()  # one trailing dot denotes the root, not an empty label
-    if not labels or "" in labels:
-        msg = "invalid URL: empty host label"
-        raise ValueError(msg)
-    ascii_labels = [_ascii_label(label) for label in labels]
+        return _ipv6_host(bare), True
+    ascii_labels = _host_labels(bare)
     name = ".".join(ascii_labels)
     if ascii_labels[-1].isdigit() or ascii_labels[-1].startswith("0x"):
         # Browsers parse a numeric last label as IPv4 (including `127.1`, `0x7f.0.0.1`); only
         # the canonical dotted quad is accepted so both sides compare as the same string.
-        try:
-            return str(ipaddress.IPv4Address(name)), True
-        except ValueError as exc:
-            msg = "invalid URL: bad IPv4 literal"
-            raise ValueError(msg) from exc
+        return _ipv4_host(name), True
     if len(name) > 253:  # noqa: PLR2004 - DNS name length limit
         msg = "invalid URL: host too long"
         raise ValueError(msg)
     return name, False
+
+
+def _browser_text(text: str) -> str:
+    """Add the default scheme and read backslashes as slashes the way a browser does."""
+    scheme_match = _SCHEME.match(text)
+    if scheme_match is None:
+        text = "https://" + text
+    if scheme_match is None or scheme_match.group(1).lower() in _SPECIAL_SCHEMES:
+        # WHATWG URL parsing reads `\` as `/` before the query in special schemes, so the
+        # browser sees `https://evil.com\@example.com` as host `evil.com`; do the same.
+        end = min((i for i in (text.find("?"), text.find("#")) if i >= 0), default=len(text))
+        text = text[:end].replace("\\", "/") + text[end:]
+    return text
+
+
+def _authority_host(netloc: str) -> str:
+    # `hostname` would lowercase, strip brackets and drop userinfo, but it also hides malformed
+    # bracket syntax; parse the authority ourselves from the raw netloc.
+    authority = netloc.rpartition("@")[2]
+    if authority.startswith("["):
+        return authority[: authority.find("]") + 1]
+    return authority.rpartition(":")[0] if ":" in authority else authority
 
 
 # Autofill matches one page against every stored URL, and the same stored URLs on every
@@ -121,27 +155,14 @@ def _parse(raw: str) -> _Url:
     if _CONTROL.search(text):
         msg = "invalid URL: control character"
         raise ValueError(msg)
-    scheme_match = _SCHEME.match(text)
-    if scheme_match is None:
-        text = "https://" + text
-    if scheme_match is None or scheme_match.group(1).lower() in _SPECIAL_SCHEMES:
-        # WHATWG URL parsing reads `\` as `/` before the query in special schemes, so the
-        # browser sees `https://evil.com\@example.com` as host `evil.com`; do the same.
-        end = min((i for i in (text.find("?"), text.find("#")) if i >= 0), default=len(text))
-        text = text[:end].replace("\\", "/") + text[end:]
+    text = _browser_text(text)
     try:
         parts = urlsplit(text)
         port = parts.port
     except ValueError as exc:
         msg = "invalid URL: unparsable"
         raise ValueError(msg) from exc
-    # `hostname` would lowercase, strip brackets and drop userinfo, but it also hides malformed
-    # bracket syntax; parse the authority ourselves from the raw netloc.
-    authority = parts.netloc.rpartition("@")[2]
-    if authority.startswith("["):
-        host = authority[: authority.find("]") + 1]
-    else:
-        host = authority.rpartition(":")[0] if ":" in authority else authority
+    host = _authority_host(parts.netloc)
     if not host:
         msg = "invalid URL: no host"
         raise ValueError(msg)
