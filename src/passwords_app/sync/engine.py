@@ -276,18 +276,28 @@ class SyncEngine:
     async def restore(self, trash_id: str) -> str:
         """Put a trashed version back into the keyring; the next cycle uploads it.
 
-        The copy always gets a fresh id: the original id may still be live (a conflict
-        loser's id belongs to the winner) or tombstoned in iCloud, and reusing it would
-        overwrite the winner or collide with Apple's Recently Deleted record.
+        A deleted item comes back under its own id while that id is free on this side, so
+        the upload recovers the record iCloud keeps in Recently Deleted rather than adding a
+        duplicate next to it. A conflict loser, or an item whose id is live again, gets a
+        fresh id: its original id belongs to another version that must not be overwritten.
         """
         entry = self._state.get_trash(trash_id)
         if entry is None:
             raise KeyError(trash_id)
         now = self._clock()
-        restored = dataclasses.replace(entry.credential, id=str(uuid.uuid4()).upper(), modified=now)
+        item_id = entry.credential.id
+        if entry.reason == "conflict" or await self._id_taken(item_id):
+            item_id = str(uuid.uuid4()).upper()
+        restored = dataclasses.replace(entry.credential, id=item_id, modified=now)
         await self._local.upsert(restored)
         self._state.remove_trash(trash_id)
         return restored.id
+
+    async def _id_taken(self, item_id: str) -> bool:
+        """Whether `item_id` names a live item here: one in the keyring or synced with iCloud."""
+        if item_id in self._state.bases():
+            return True
+        return item_id in (await self._local.fetch()).items
 
     def purge(self, trash_id: str) -> None:
         """Delete a trash entry for good."""

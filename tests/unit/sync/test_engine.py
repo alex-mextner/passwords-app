@@ -327,7 +327,8 @@ async def test_conflict_on_delete_keeps_the_item(w: World) -> None:
 # ---------------------------------------------------------------- S14 / S15 trash
 
 
-async def test_s14_restore_puts_item_back_on_both_sides(w: World) -> None:
+async def test_s14_restore_puts_item_back_on_both_sides_under_its_own_id(w: World) -> None:
+    # Its own id lets iCloud recover the record from Recently Deleted instead of duplicating it.
     a = make_credential("A", title="Bank")
     await synced(w, a)
     w.remote.remove("A")
@@ -335,14 +336,45 @@ async def test_s14_restore_puts_item_back_on_both_sides(w: World) -> None:
     (entry,) = w.engine.trash()
     w.clock.advance(days=3)
     new_id = await w.engine.restore(entry.trash_id)
-    assert new_id != "A"
-    assert w.local.items[new_id].title == "Bank"
-    assert w.local.items[new_id].modified == w.clock.now
+    assert new_id == "A"
+    assert w.local.items["A"].title == "Bank"
+    assert w.local.items["A"].modified == w.clock.now
     assert w.engine.trash() == []
     report = await w.engine.run_once()
     assert report.created_remote == 1
-    assert w.remote.items[new_id].credential.title == "Bank"
+    assert w.remote.items["A"].credential.title == "Bank"
     assert w.converged()
+
+
+async def test_restore_never_takes_the_id_of_a_live_item(w: World) -> None:
+    a = make_credential("A", password="fake-old")
+    await synced(w, a)
+    w.local.remove("A")
+    await w.engine.run_once()
+    (entry,) = w.engine.trash()
+    w.local.put(at(a, 5, password="fake-live"))
+    new_id = await w.engine.restore(entry.trash_id)
+    assert new_id != "A"
+    assert w.local.items["A"].password == "fake-live"
+    assert w.local.items[new_id].password == "fake-old"
+
+
+async def test_restoring_two_versions_of_one_item_keeps_both(w: World) -> None:
+    a = make_credential("A", password="fake-v1")
+    await synced(w, a)
+    w.remote.remove("A")
+    await w.engine.run_once()
+    w.remote.put(at(a, 7, password="fake-v2"))  # recovered on the iPhone, then edited
+    await w.engine.run_once()
+    w.remote.remove("A")
+    await w.engine.run_once()
+    by_password = {e.credential.password: e for e in w.engine.trash()}
+    v1, v2 = by_password["fake-v1"], by_password["fake-v2"]
+    assert await w.engine.restore(v2.trash_id) == "A"
+    other = await w.engine.restore(v1.trash_id)
+    assert other != "A"
+    assert w.local.items["A"].password == "fake-v2"
+    assert w.local.items[other].password == "fake-v1"
 
 
 async def test_s14_restoring_a_conflict_loser_never_overwrites_the_winner(w: World) -> None:

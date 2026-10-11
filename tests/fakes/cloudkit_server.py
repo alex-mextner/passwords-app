@@ -276,14 +276,28 @@ class FakeCloudKit:
             ]
         return {name: self.item(name) for name in names}
 
-    def logins(self) -> dict[str, Credential]:
+    def logins(self, *, deleted: bool = False) -> dict[str, Credential]:
+        """Logins by record name (`deleted`: those in Apple's Recently Deleted)."""
         stored = [passwords.StoredItem(n, a) for n, a in self.items().items()]
         out: dict[str, Credential] = {}
-        for login in passwords.pair_logins(stored):
+        for login in passwords.pair_logins(stored, deleted=deleted):
             cred = passwords.to_credential(login)
             if cred is not None:
                 out[cred.id] = cred
         return out
+
+    def trash_login(self, record_name: str, sidecar_name: str | None = None) -> None:
+        """Delete a login as the Passwords app does: move it into Recently Deleted."""
+        self.put_item(record_name, {**self.item(record_name), "agrp": passwords.AGRP_LOGIN_DELETED})
+        if sidecar_name is not None:
+            side = {**self.item(sidecar_name), "agrp": passwords.AGRP_SIDECAR_DELETED}
+            self.put_item(sidecar_name, side)
+
+    def recover_login(self, record_name: str, sidecar_name: str | None = None) -> None:
+        """Recover a login from Recently Deleted, as the Passwords app does."""
+        self.put_item(record_name, {**self.item(record_name), "agrp": passwords.AGRP_LOGIN})
+        if sidecar_name is not None:
+            self.put_item(sidecar_name, {**self.item(sidecar_name), "agrp": passwords.AGRP_SIDECAR})
 
     def fail(
         self,

@@ -7,6 +7,10 @@ item; any record that cannot be read fails the whole fetch, because a shorter li
 like deletions to the sync engine. Writes go out as one zone-atomic batch per login (its item
 and sidecar together), each record conditional on the change tag it was read with.
 
+Deleting works like the Passwords app: the login and its sidecar move into Apple's Recently
+Deleted, where every Apple device can still recover them. Creating a login whose record is
+in Recently Deleted moves that record back instead of adding a duplicate next to it.
+
 A login's version token (the sync engine's etag) combines the change tags of its item and its
 sidecar, so an edit to either on another device makes a stale write fail.
 """
@@ -51,10 +55,6 @@ class RecordTransport(Protocol):
         self, saves: Sequence[tuple[ckks.CloudKitRecord, bool]]
     ) -> list[CloudKitResult]: ...
 
-    def delete_records(
-        self, deletes: Sequence[tuple[str, ckks.ZoneId, str | None]]
-    ) -> list[CloudKitResult]: ...
-
 
 RecoverableKeys = tuple[dict[str, bytes], list[ckks.CloudKitRecord]]
 
@@ -68,17 +68,23 @@ class Identity:
 
 
 @dataclasses.dataclass(frozen=True, slots=True)
-class StoredLogin:
-    """A login as stored: its records, decrypted attributes and the credential they map to."""
+class LoginRecords:
+    """A login's decrypted attributes and the records they live in."""
 
     login: passwords.Login
     item: ckks.CloudKitRecord
     sidecar: ckks.CloudKitRecord | None
-    credential: Credential
 
     @property
     def etag(self) -> str:
         return version_token(self.item, self.sidecar)
+
+
+@dataclasses.dataclass(frozen=True, slots=True)
+class StoredLogin(LoginRecords):
+    """A live login as stored, with the credential it maps to."""
+
+    credential: Credential
 
 
 def version_token(item: ckks.CloudKitRecord, sidecar: ckks.CloudKitRecord | None) -> str:
@@ -158,19 +164,28 @@ class KeychainClient:
             self._decrypted[key] = cached
         return cached
 
-    def _logins(self, state: ZoneState) -> dict[str, StoredLogin]:
+    def _paired(self, state: ZoneState, *, deleted: bool = False) -> list[LoginRecords]:
+        """Return the zone's logins with their records (`deleted`: those in Recently Deleted)."""
         keyring = self._keyring(state)
         records = {r.record_name: r for r in state.by_type("item")}
         items = [
             passwords.StoredItem(name, self._decrypt(rec, keyring)) for name, rec in records.items()
         ]
+        return [
+            LoginRecords(
+                login,
+                records[login.record_name],
+                records[login.sidecar.record_name] if login.sidecar is not None else None,
+            )
+            for login in passwords.pair_logins(items, deleted=deleted)
+        ]
+
+    def _logins(self, state: ZoneState) -> dict[str, StoredLogin]:
         out: dict[str, StoredLogin] = {}
-        for login in passwords.pair_logins(items):
-            cred = passwords.to_credential(login)
-            if cred is None:
-                continue
-            side = records[login.sidecar.record_name] if login.sidecar is not None else None
-            out[login.record_name] = StoredLogin(login, records[login.record_name], side, cred)
+        for pair in self._paired(state):
+            cred = passwords.to_credential(pair.login)
+            if cred is not None:
+                out[pair.login.record_name] = StoredLogin(pair.login, pair.item, pair.sidecar, cred)
         return out
 
     # --- writing -----------------------------------------------------------------------------
@@ -184,13 +199,20 @@ class KeychainClient:
         return state, self._logins(state)
 
     def save(self, cred: Credential, etag: str | None) -> str:
-        """Create (`etag` None) or update the login `cred.id`; return its new version token."""
+        """Create (`etag` None) or update the login `cred.id`; return its new version token.
+
+        Creating a login whose record sits in Recently Deleted moves that record back.
+        """
         state, logins = self._current()
         existing = logins.get(cred.id)
         if (existing.etag if existing is not None else None) != etag:
             msg = f"login {cred.id} changed since it was read"
             raise RecordConflictError(msg)
-        saves, item_name, side_name = self._plan(cred, existing, logins, self._keyring(state))
+        base: LoginRecords | None = existing
+        if base is None:
+            trashed = {p.login.record_name: p for p in self._paired(state, deleted=True)}
+            base = trashed.get(cred.id)
+        saves, item_name, side_name = self._plan(cred, base, logins, self._keyring(state))
         if not saves:
             return etag or ""
         results = self._transport.save_records(saves)
@@ -202,21 +224,28 @@ class KeychainClient:
     def _plan(
         self,
         cred: Credential,
-        existing: StoredLogin | None,
+        existing: LoginRecords | None,
         logins: Mapping[str, StoredLogin],
         keyring: pipeline.KeyRing,
     ) -> tuple[list[tuple[ckks.CloudKitRecord, bool]], str, str | None]:
-        """Plan the (record, create?) saves turning `existing` into `cred`, and the record names."""
+        """Plan the (record, create?) saves turning `existing` into `cred`, and the record names.
+
+        An `existing` login in Recently Deleted is moved back out by the same saves.
+        """
         now = self._clock()
         if existing is None:
             attrs = passwords.new_login(cred, now)
             item = passwords.StoredItem(cred.id, {})
             prev_item = prev_side = side_attrs = None
         else:
-            attrs = passwords.updated_login(existing.login, cred, now)
-            item = existing.login.item
+            stored = existing.login
+            live = stored
+            if passwords.is_login(stored.item.attrs, deleted=True):
+                live = passwords.moved_login(stored, now, deleted=False)
+            attrs = passwords.updated_login(live, cred, now)
+            item = stored.item
             prev_item, prev_side = existing.item, existing.sidecar
-            side_attrs = existing.login.sidecar.attrs if existing.login.sidecar else None
+            side_attrs = stored.sidecar.attrs if stored.sidecar else None
         _refuse_duplicate(cred, attrs.item, item.record_name, logins)
         # The version token covers both records, so a save touching either one rewrites the
         # other unchanged too: its change tag then guards the batch against a concurrent edit
@@ -258,10 +287,14 @@ class KeychainClient:
         return self._cache.get(self.zone)
 
     def delete(self, item_id: str, etag: str | None) -> None:
-        """Delete a login and its sidecar together; `etag` None deletes whatever is there."""
+        """Move a login and its sidecar into Recently Deleted, as the Passwords app deletes.
+
+        `etag` None skips the check against the caller's version; the move itself is still
+        conditional on the tags just read, so it never buries an edit it has not seen.
+        """
         # The fresh read finds a sidecar added on another device since the last fetch, which
-        # no change tag in the batch could guard; each delete then carries the tag it was
-        # read with, so an edit landing in the round trip fails the batch instead.
+        # no change tag in the batch could guard; each save then carries the tag it was read
+        # with, so an edit landing in the round trip fails the batch instead.
         logins = self.fetch()
         state = self._cache.get(self.zone)
         existing = logins.get(item_id)
@@ -270,13 +303,23 @@ class KeychainClient:
         if etag is not None and existing.etag != etag:
             msg = f"login {item_id} changed since it was read"
             raise RecordConflictError(msg)
-        records = [existing.item] if existing.sidecar is None else [existing.item, existing.sidecar]
-        guard = etag is not None
-        deletes = [(r.record_name, self.zone, r.etag if guard else None) for r in records]
-        _check(self._transport.delete_records(deletes), "deleting the login")
-        for rec in records:
-            state.records.pop(rec.record_name, None)
-        self._cache.save()
+        trashed = passwords.moved_login(existing.login, self._clock(), deleted=True)
+        keyring = self._keyring(state)
+        moves = [(trashed.item, existing.item)]
+        if trashed.sidecar is not None and existing.sidecar is not None:
+            moves.append((trashed.sidecar, existing.sidecar))
+        saves = [
+            (
+                pipeline.encrypt_item(
+                    moved.attrs, moved.record_name, self.zone, keyring, previous=previous
+                ),
+                False,
+            )
+            for moved, previous in moves
+        ]
+        results = self._transport.save_records(saves)
+        _check(results, "deleting the login")
+        self._record_saved(state, saves, results)
 
 
 def _refuse_duplicate(
