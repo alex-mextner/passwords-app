@@ -78,6 +78,18 @@ def fill_first_candidate(page: Page, site: SiteServer, vault: Vault) -> None:
     assert "Get" in vault.calls()
 
 
+def fill_field_focused_while_loading(page: Page, site: SiteServer, vault: Vault) -> None:
+    """The user name field has focus before the content script starts (the page focused it,
+    or a click came right after load: Firefox injects only after the load event). Its menu
+    opens anyway, without another click."""
+    del vault
+    page.goto(site.url(NORTHWIND, "/login.html?focus=email"))
+    wait_overlay(page, "dropdown")
+    page.press("Enter")
+    wait_until(lambda: value(page, "#password"), what="password filled")
+    assert (value(page, "#email"), value(page, "#password")) == ALEX
+
+
 def keyboard_picks_second(page: Page, site: SiteServer, vault: Vault) -> None:
     del vault
     page.goto(site.url(NORTHWIND))
