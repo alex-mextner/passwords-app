@@ -5,7 +5,12 @@
 from __future__ import annotations
 
 import asyncio
+import os
+import signal
+import socket
 import stat
+import struct
+from pathlib import Path
 from typing import TYPE_CHECKING
 
 import pytest
@@ -26,9 +31,10 @@ from passwords_app.sync.ports import LocalUnavailable
 
 if TYPE_CHECKING:
     from collections.abc import AsyncIterator
-    from pathlib import Path
 
     from tests.harness.dbus_session import PrivateSession
+
+    from passwords_app.core.model import Credential
 
 pytestmark = [pytest.mark.integration, pytest.mark.timeout(60)]
 
@@ -43,12 +49,12 @@ def no_system_bus(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(main, "_system_bus", none)
 
 
-def memory_daemon(tmp_path: Path) -> Daemon:
+def memory_daemon(tmp_path: Path, local: MemoryLocal | None = None) -> Daemon:
     remote = MemoryRemote({"A": make_credential("A")})
     account = FakeAccount(remote, apple_id="a@example.com", signed_in=True, joined=True)
     return Daemon(
         account=account,
-        local=MemoryLocal(),
+        local=MemoryLocal() if local is None else local,
         state=StateStore(tmp_path / "state.db", STATE_KEY),
         clock=FakeClock(),
         notifier=FakeNotifier(),
@@ -213,3 +219,114 @@ async def test_serve_refuses_when_already_running(
 
     monkeypatch.setattr(main, "build_daemon", build)
     assert await main.serve(asyncio.Event()) == main.EX_ALREADY_RUNNING
+
+
+def bus_socket(connection: MessageBus) -> socket.socket:
+    sock = connection._sock
+    assert sock is not None
+    return sock
+
+
+def private_bus_daemon_pid(daemon_bus: MessageBus, session: PrivateSession) -> int:
+    """Pid of the dbus-daemon at the other end of the socket, proven to be the private one."""
+    credentials = bus_socket(daemon_bus).getsockopt(
+        socket.SOL_SOCKET, socket.SO_PEERCRED, struct.calcsize("3i")
+    )
+    pid, _, _ = struct.unpack("3i", credentials)
+    command_line = Path(f"/proc/{pid}/cmdline").read_bytes().split(b"\0")
+    assert command_line[0].endswith(b"dbus-daemon")
+    assert str(session.root).encode() in b" ".join(command_line)
+    return int(pid)
+
+
+async def test_serve_survives_a_full_bus_socket_while_replying(
+    private_session: PrivateSession,
+    bus: MessageBus,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # Issue #122: two List replies go out while the bus is not draining the daemon's socket.
+    # The first fills the socket, the second finds it full (EAGAIN); dbus-fast used to treat
+    # that as a lost connection and the daemon exited.
+    items = 300
+    local = MemoryLocal({f"ID-{n}": make_credential(f"ID-{n}") for n in range(items)})
+    daemon = memory_daemon(tmp_path, local)
+    served: list[MessageBus] = []
+    bus_pid: list[int] = []
+
+    async def build(daemon_bus: MessageBus) -> Daemon:
+        served.append(daemon_bus)
+        return daemon
+
+    entered = 0
+    both_entered = asyncio.Event()
+    list_items = daemon.list_items
+
+    async def list_items_once_the_bus_stalls() -> list[Credential]:
+        # Both calls reply only after the bus stopped reading, so neither reply can drain.
+        nonlocal entered
+        entered += 1
+        if entered == 2:
+            os.kill(bus_pid[0], signal.SIGSTOP)
+            both_entered.set()
+        await both_entered.wait()
+        return await list_items()
+
+    monkeypatch.setattr(main, "build_daemon", build)
+    monkeypatch.setattr(daemon, "list_items", list_items_once_the_bus_stalls)
+    stop = asyncio.Event()
+    server = asyncio.create_task(main.serve(stop))
+
+    async def owned() -> bool:
+        return await name_owner(bus) is not None
+
+    await wait_for(owned, limit=10)
+    (daemon_bus,) = served
+    bus_pid.append(private_bus_daemon_pid(daemon_bus, private_session))
+    # The smallest send buffer the kernel allows, so a few hundred items overflow it.
+    bus_socket(daemon_bus).setsockopt(socket.SOL_SOCKET, socket.SO_SNDBUF, 4096)
+    calls = [
+        asyncio.create_task(
+            bus.call(
+                Message(destination=BUS_NAME, path=OBJECT_PATH, interface=INTERFACE, member="List")
+            )
+        )
+        for _ in range(2)
+    ]
+    try:
+        await asyncio.wait_for(both_entered.wait(), 10)
+        await asyncio.sleep(0.5)
+        assert not server.done(), "the daemon exited while its bus socket was full"
+        assert daemon_bus.connected
+    finally:
+        os.kill(bus_pid[0], signal.SIGCONT)
+    for call in calls:
+        reply = await asyncio.wait_for(call, 10)
+        assert reply is not None
+        assert reply.message_type == MessageType.METHOD_RETURN
+        assert {item["id"].value for item in reply.body[0]} == set(local.items)
+    assert daemon_bus.connected
+    stop.set()
+    assert await asyncio.wait_for(server, 10) == main.EX_OK
+
+
+async def test_serve_fails_when_the_bus_connection_is_lost(
+    bus: MessageBus, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # A failure exit status is what makes systemd's Restart=on-failure bring the daemon back.
+    served: list[MessageBus] = []
+
+    async def build(daemon_bus: MessageBus) -> Daemon:
+        served.append(daemon_bus)
+        return memory_daemon(tmp_path)
+
+    monkeypatch.setattr(main, "build_daemon", build)
+    server = asyncio.create_task(main.serve(asyncio.Event()))
+
+    async def owned() -> bool:
+        return await name_owner(bus) is not None
+
+    await wait_for(owned, limit=10)
+    (daemon_bus,) = served
+    bus_socket(daemon_bus).shutdown(socket.SHUT_RDWR)
+    assert await asyncio.wait_for(server, 10) == main.EX_TEMPFAIL

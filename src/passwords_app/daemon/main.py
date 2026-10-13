@@ -5,7 +5,8 @@
 Startup needs the keyring: the state.db key lives in the default collection and the synced
 items in "iCloud Passwords". If either is locked (e.g. before the user unlocked the login
 keyring) the process exits with EX_TEMPFAIL and systemd restarts it later, rather than
-holding the bus name while unable to answer anything.
+holding the bus name while unable to answer anything. Losing the session bus connection
+exits with EX_TEMPFAIL too, so systemd's Restart=on-failure brings the daemon back.
 """
 
 from __future__ import annotations
@@ -19,10 +20,10 @@ import sys
 from typing import TYPE_CHECKING
 
 from dbus_fast import BusType, RequestNameReply
-from dbus_fast.aio import MessageBus
 
 from passwords_app.daemon import BUS_NAME, OBJECT_PATH
 from passwords_app.daemon.account import ICloudAccount
+from passwords_app.daemon.bus import PatientMessageBus
 from passwords_app.daemon.controller import Daemon
 from passwords_app.daemon.keyring_lock import KeyringLockWatch
 from passwords_app.daemon.network import watch_network
@@ -34,6 +35,8 @@ from passwords_app.sync.ports import LocalUnavailable
 
 if TYPE_CHECKING:
     from collections.abc import Sequence
+
+    from dbus_fast.aio import MessageBus
 
     from passwords_app.store.state import StateStore
 
@@ -91,14 +94,14 @@ async def build_daemon(bus: MessageBus) -> Daemon:
 
 async def _system_bus() -> MessageBus | None:
     try:
-        return await MessageBus(bus_type=BusType.SYSTEM).connect()
+        return await PatientMessageBus(bus_type=BusType.SYSTEM).connect()
     except (OSError, EOFError, ValueError) as exc:
         _log.info("system bus unavailable (%s); using the portal for network state", exc)
         return None
 
 
 async def serve(stop: asyncio.Event) -> int:
-    bus = await MessageBus().connect()
+    bus = await PatientMessageBus().connect()
     try:
         daemon = await build_daemon(bus)
     except LocalUnavailable as exc:
@@ -113,7 +116,7 @@ async def serve(stop: asyncio.Event) -> int:
         await daemon.start()
         watch = await watch_network(system_bus, bus, daemon.scheduler.network_up)
         _log.info("daemon ready on %s", BUS_NAME)
-        # dbus-fast leaves wait_for_disconnect unannotated; it returns None once closed.
+        # dbus-fast leaves wait_for_disconnect unannotated; it raises what ended the connection.
         disconnected = asyncio.ensure_future(
             bus.wait_for_disconnect()  # type: ignore[no-untyped-call]
         )
@@ -127,6 +130,10 @@ async def serve(stop: asyncio.Event) -> int:
         with contextlib.suppress(Exception):
             await lock_watch.stop()
         await daemon.stop()
+        if not stop.is_set():
+            reason = disconnected.exception() or "closed"
+            _log.error("lost the session bus connection (%s); exiting for a restart", reason)
+            return EX_TEMPFAIL
     except AlreadyRunningError as exc:
         _log.error("%s", exc)
         return EX_ALREADY_RUNNING
