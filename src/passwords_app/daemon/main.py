@@ -15,6 +15,7 @@ import asyncio
 import contextlib
 import logging
 import signal
+import sqlite3
 import sys
 from typing import TYPE_CHECKING
 
@@ -34,6 +35,7 @@ from passwords_app.sync.ports import LocalUnavailable
 
 if TYPE_CHECKING:
     from collections.abc import Sequence
+    from pathlib import Path
 
     from passwords_app.store.state import StateStore
 
@@ -66,7 +68,36 @@ async def open_state(bus: MessageBus) -> StateStore:
     from passwords_app.store.state import StateStore  # noqa: PLC0415
 
     key = await app_secret(bus, STATE_KEY_NAME)
-    return StateStore(state_path(), key)
+    path = state_path()
+    # The keyring was replaced, or state.db came from another computer or is not a database at
+    # all: nothing in the file can be used. Keep it aside and start empty rather than failing
+    # every request, or the daemon, for good. A newer schema (StateSchemaError) stays an error,
+    # and so does every more specific sqlite error (busy, read-only, a failing migration):
+    # moving a live file away would lose data.
+    store: StateStore | None = None
+    try:
+        store = StateStore(path, key)
+        usable = store.matches_key()
+    except sqlite3.DatabaseError as exc:
+        if store is not None:
+            store.close()
+        if type(exc) is not sqlite3.DatabaseError:
+            # Busy, read-only, a failing migration...: the file is fine, something else is not.
+            raise
+        _set_aside_state(path, f"it is not a usable database ({exc})")
+    else:
+        if usable:
+            return store
+        store.close()
+        _set_aside_state(path, "it was written under another keyring key")
+    return StateStore(path, key)
+
+
+def _set_aside_state(path: Path, why: str) -> None:
+    from passwords_app.store.state import set_aside  # noqa: PLC0415
+
+    kept = set_aside(path)
+    _log.warning("state.db cannot be used (%s); kept as %s, starting with an empty one", why, kept)
 
 
 async def build_daemon(bus: MessageBus) -> Daemon:

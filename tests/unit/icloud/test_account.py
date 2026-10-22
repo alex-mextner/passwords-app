@@ -210,6 +210,15 @@ def test_fresh_computer_is_signed_out(account: acct.Account) -> None:
     assert account.status() == acct.AccountStatus(apple_id=None, signed_in=False, joined=False)
 
 
+def test_session_the_key_cannot_open_is_signed_out(account: acct.Account) -> None:
+    # The keyring was replaced since the session was saved: the file is there but unreadable.
+    account.paths.ensure()
+    account.paths.session.write_bytes(bytes(range(64)))
+    assert account.status() == acct.AccountStatus(apple_id=None, signed_in=False, joined=False)
+    with pytest.raises(acct.SignInRequired):
+        account.open_keychain()
+
+
 def test_default_config_dir(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path))
     assert acct.Account(anisette=NoAnisette()).paths.root == tmp_path / "passwords-app"
