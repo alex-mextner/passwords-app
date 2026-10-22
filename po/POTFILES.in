@@ -5,6 +5,7 @@ src/passwords_app/app/ui/application.py
 src/passwords_app/app/ui/detail.py
 src/passwords_app/app/ui/editor.py
 src/passwords_app/app/ui/item_list.py
+src/passwords_app/app/ui/lock.py
 src/passwords_app/app/ui/new_password.py
 src/passwords_app/app/ui/preferences.py
 src/passwords_app/app/ui/shortcuts.py

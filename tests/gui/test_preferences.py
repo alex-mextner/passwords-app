@@ -181,6 +181,28 @@ def test_lock_hides_secrets_and_unlock_needs_authorization(app: support.AppUnder
     assert not app.window.detail.reveal_button.get_active()
 
 
+def test_lock_texts_promise_a_fingerprint_only_after_the_probe_found_one(
+    app: support.AppUnderTest,
+) -> None:
+    app.wait_loaded()
+    app.settings.set_boolean("lock-enabled", True)  # noqa: FBT003 - Gio.Settings takes the value positionally
+    app.window.lock()
+    assert app.window.lock_page.get_description() == "Unlock with your password."
+    assert _preferences(app).lock_row.get_subtitle() == (
+        "Ask for your password after a period without use."
+    )
+    app.window.set_fingerprint_available(available=True)
+    assert app.window.lock_page.get_description() == "Unlock with your password or fingerprint."
+    app.application.preferences.close()
+    support.pump(0.2)
+    app.application.preferences = None
+    assert _preferences(app).lock_row.get_subtitle() == (
+        "Ask for your password or fingerprint after a period without use."
+    )
+    app.window.set_fingerprint_available(available=False)
+    assert app.window.lock_page.get_description() == "Unlock with your password."
+
+
 def test_idle_timer_locks_only_when_enabled(app: support.AppUnderTest) -> None:
     app.wait_loaded()
     assert not app.window.idle.armed

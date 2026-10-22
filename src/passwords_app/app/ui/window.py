@@ -26,7 +26,7 @@ from passwords_app.app.ui.clipboard import ClipboardGuard
 from passwords_app.app.ui.detail import DetailPage
 from passwords_app.app.ui.favicons import FaviconLoader
 from passwords_app.app.ui.item_list import ItemListPage
-from passwords_app.app.ui.lock import IdleTimer
+from passwords_app.app.ui.lock import IdleTimer, unlock_hint
 from passwords_app.app.ui.new_password import NewPasswordDialog
 from passwords_app.app.ui.shortcuts import shortcuts
 from passwords_app.app.ui.sidebar import Sidebar
@@ -73,6 +73,8 @@ class MainWindow(Adw.ApplicationWindow):
         self.settings = settings
         self._now = now
         self._authorizer = authorizer
+        # False until the fprintd probe answers: never promise a fingerprint before it is known.
+        self.fingerprint_available = False
         self.last_deleted: Item | None = None
         self.pending_select: str | None = None
         self.last_toast: Adw.Toast | None = None
@@ -161,7 +163,7 @@ class MainWindow(Adw.ApplicationWindow):
         self.lock_page = Adw.StatusPage(
             icon_name="system-lock-screen-symbolic",
             title=_("Passwords Is Locked"),
-            description=_("Unlock with your password or fingerprint."),
+            description=unlock_hint(fingerprint=False),
             child=unlock,
         )
         self.lock_page.add_css_class("lock-screen")
@@ -316,6 +318,13 @@ class MainWindow(Adw.ApplicationWindow):
         self.lock_available = authorizer is not None
         self._apply_lock_setting()
 
+    def set_fingerprint_available(self, *, available: bool) -> None:
+        """Late-bind whether the unlock dialog can offer a fingerprint (reader, enrolled finger)."""
+        if available == self.fingerprint_available:
+            return  # keeps "Not unlocked. Try again." on screen when the answer changes nothing
+        self.fingerprint_available = available
+        self.lock_page.set_description(unlock_hint(fingerprint=available))
+
     def _apply_lock_setting(self) -> None:
         if self.lock_available and self.settings.get_boolean("lock-enabled"):
             self.idle.arm()
@@ -347,7 +356,7 @@ class MainWindow(Adw.ApplicationWindow):
             if not authorized:
                 self.lock_page.set_description(_("Not unlocked. Try again."))
                 return
-            self.lock_page.set_description(_("Unlock with your password or fingerprint."))
+            self.lock_page.set_description(unlock_hint(fingerprint=self.fingerprint_available))
             self.root_stack.set_visible_child_name("main")
             self._on_item_selected()
             self._apply_lock_setting()

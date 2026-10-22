@@ -782,9 +782,13 @@ msgstr "Блокировка приложения"
 msgid "Lock When Idle"
 msgstr "Блокировать при бездействии"
 
-#: src/passwords_app/app/ui/preferences.py:88
+#: src/passwords_app/app/ui/lock.py:53
 msgid "Ask for your password or fingerprint after a period without use."
 msgstr "Запрашивать пароль или отпечаток пальца после периода бездействия."
+
+#: src/passwords_app/app/ui/lock.py:54
+msgid "Ask for your password after a period without use."
+msgstr "Запрашивать пароль после периода бездействия."
 
 #: src/passwords_app/app/ui/preferences.py:90
 msgid "Unavailable: the Passwords polkit policy is not installed."
@@ -1107,10 +1111,13 @@ msgstr "Разблокировать"
 msgid "Passwords Is Locked"
 msgstr "«Пароли» заблокированы"
 
-#: src/passwords_app/app/ui/window.py:162
-#: src/passwords_app/app/ui/window.py:348
+#: src/passwords_app/app/ui/lock.py:46
 msgid "Unlock with your password or fingerprint."
 msgstr "Разблокируйте паролем или отпечатком пальца."
+
+#: src/passwords_app/app/ui/lock.py:47
+msgid "Unlock with your password."
+msgstr "Разблокируйте паролем."
 
 #: src/passwords_app/app/ui/window.py:346
 msgid "Not unlocked. Try again."

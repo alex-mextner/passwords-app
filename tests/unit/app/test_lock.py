@@ -27,7 +27,13 @@ with warnings.catch_warnings():
 
     from passwords_app.app.constants import APP_ID, POLKIT_UNLOCK_ACTION
     from passwords_app.app.ui import lock
-    from passwords_app.app.ui.lock import IdleTimer, PolkitAuthorizer
+    from passwords_app.app.ui.lock import (
+        FingerprintProbe,
+        IdleTimer,
+        PolkitAuthorizer,
+        idle_lock_hint,
+        unlock_hint,
+    )
 
 if TYPE_CHECKING:
     from collections.abc import Callable, Iterator
@@ -72,6 +78,28 @@ _POLKIT_XML = """
 </node>
 """
 
+FPRINT_NAME = "net.reactivated.Fprint"
+FPRINT_MANAGER_PATH = "/net/reactivated/Fprint/Manager"
+FPRINT_DEVICE_PATH = "/net/reactivated/Fprint/Device/0"
+_FPRINT_MANAGER_XML = """
+<node>
+  <interface name="net.reactivated.Fprint.Manager">
+    <method name="GetDefaultDevice">
+      <arg type="o" direction="out"/>
+    </method>
+  </interface>
+</node>
+"""
+_FPRINT_DEVICE_XML = """
+<node>
+  <interface name="net.reactivated.Fprint.Device">
+    <method name="ListEnrolledFingers">
+      <arg type="s" direction="in"/>
+      <arg type="as" direction="out"/>
+    </method>
+  </interface>
+</node>
+"""
 
 # ---------------------------------------------------------------------- main-loop helpers
 
@@ -440,3 +468,128 @@ def test_fake_authority_models_a_kept_authorization(
     assert answer(authorizer) is True
     assert answer(authorizer) is True
     assert polkit.prompts == 1
+
+
+# ---------------------------------------------------------------------- fingerprint reader
+
+
+@dataclass
+class FakeFprint:
+    """net.reactivated.Fprint: a default reader with enrolled fingers, or one of its errors."""
+
+    default_device_error: str = ""
+    list_error: str = ""
+    fingers: list[str] = field(default_factory=lambda: ["right-index-finger"])
+    users: list[str] = field(default_factory=list)
+
+    def manager(
+        self,
+        _conn: Gio.DBusConnection,
+        _sender: str,
+        _path: str,
+        _iface: str,
+        _method: str,
+        _params: GLib.Variant,
+        invocation: Gio.DBusMethodInvocation,
+    ) -> None:
+        if self.default_device_error:
+            invocation.return_dbus_error(self.default_device_error, "No devices available")
+            return
+        invocation.return_value(GLib.Variant("(o)", (FPRINT_DEVICE_PATH,)))
+
+    def device(
+        self,
+        _conn: Gio.DBusConnection,
+        _sender: str,
+        _path: str,
+        _iface: str,
+        _method: str,
+        params: GLib.Variant,
+        invocation: Gio.DBusMethodInvocation,
+    ) -> None:
+        self.users.append(params.unpack()[0])
+        if self.list_error:
+            invocation.return_dbus_error(self.list_error, "No fingerprints enrolled")
+            return
+        invocation.return_value(GLib.Variant("(as)", (self.fingers,)))
+
+
+@pytest.fixture
+def fprintd(bus_address: str) -> Iterator[FakeFprint]:
+    conn = _connect(bus_address)
+    fake = FakeFprint()
+    manager = Gio.DBusNodeInfo.new_for_xml(_FPRINT_MANAGER_XML).interfaces[0]
+    device = Gio.DBusNodeInfo.new_for_xml(_FPRINT_DEVICE_XML).interfaces[0]
+    registrations = [
+        conn.register_object_with_closures2(FPRINT_MANAGER_PATH, manager, fake.manager, None, None),
+        conn.register_object_with_closures2(FPRINT_DEVICE_PATH, device, fake.device, None, None),
+    ]
+    conn.call_sync(
+        "org.freedesktop.DBus",
+        "/org/freedesktop/DBus",
+        "org.freedesktop.DBus",
+        "RequestName",
+        GLib.Variant("(su)", (FPRINT_NAME, 4)),
+        GLib.VariantType.new("(u)"),
+        Gio.DBusCallFlags.NONE,
+        5000,
+        None,
+    )
+    try:
+        yield fake
+    finally:
+        for registration in registrations:
+            conn.unregister_object(registration)
+        conn.close_sync(None)
+
+
+def test_no_fingerprint_without_fprintd_on_the_bus(bus: Gio.DBusConnection) -> None:
+    assert answer(FingerprintProbe(bus)) is False
+
+
+def test_no_fingerprint_without_any_system_bus(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    nowhere = f"unix:path={tmp_path / 'no-system-bus'}"
+    monkeypatch.setenv("DBUS_SYSTEM_BUS_ADDRESS", nowhere)
+    assert os.environ["DBUS_SYSTEM_BUS_ADDRESS"] == nowhere  # never the real system bus
+    assert answer(FingerprintProbe()) is False
+
+
+def test_no_fingerprint_when_fprintd_has_no_reader(
+    bus: Gio.DBusConnection, fprintd: FakeFprint
+) -> None:
+    """The machine fprintd is installed on but `fprintd-list` says "No devices available"."""
+    fprintd.default_device_error = "net.reactivated.Fprint.Error.NoSuchDevice"
+    assert answer(FingerprintProbe(bus)) is False
+    assert fprintd.users == []  # no reader, so nobody asked it about enrolled fingers
+
+
+@pytest.mark.parametrize(
+    ("error", "fingers"),
+    [("net.reactivated.Fprint.Error.NoEnrolledPrints", ["ignored"]), ("", [])],
+    ids=["NoEnrolledPrints", "empty list"],
+)
+def test_no_fingerprint_when_nothing_is_enrolled(
+    bus: Gio.DBusConnection, fprintd: FakeFprint, error: str, fingers: list[str]
+) -> None:
+    fprintd.list_error = error
+    fprintd.fingers = fingers
+    assert answer(FingerprintProbe(bus)) is False
+
+
+def test_fingerprint_with_a_reader_and_enrolled_fingers(
+    bus: Gio.DBusConnection, fprintd: FakeFprint
+) -> None:
+    assert answer(FingerprintProbe(bus)) is True
+    assert fprintd.users == [""]  # the empty name means the calling user
+
+
+def test_texts_promise_a_fingerprint_only_when_one_can_be_given() -> None:
+    assert unlock_hint(fingerprint=False) == "Unlock with your password."
+    assert unlock_hint(fingerprint=True) == "Unlock with your password or fingerprint."
+    assert idle_lock_hint(fingerprint=False) == "Ask for your password after a period without use."
+    assert (
+        idle_lock_hint(fingerprint=True)
+        == "Ask for your password or fingerprint after a period without use."
+    )

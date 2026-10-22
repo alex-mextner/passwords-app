@@ -23,7 +23,7 @@ from passwords_app.app.dbus_export import (
     release_app_name,
 )
 from passwords_app.app.i18n import _, ngettext
-from passwords_app.app.ui.lock import PolkitAuthorizer
+from passwords_app.app.ui.lock import FingerprintProbe, PolkitAuthorizer
 from passwords_app.app.ui.preferences import PreferencesDialog
 from passwords_app.app.ui.shortcuts import build_dialog, shortcuts
 from passwords_app.app.ui.widgets import on_activate
@@ -117,6 +117,7 @@ class PasswordsApplication(Adw.Application):
         self._settings = settings
         self._authorizer = authorizer
         self._lock_probe = lock_probe and authorizer is None
+        self._fingerprint_available = False
         self._now = now
         self.window: MainWindow | None = None
         self.vault: Vault | None = None
@@ -205,6 +206,7 @@ class PasswordsApplication(Adw.Application):
         if self._lock_probe:
             probe = PolkitAuthorizer()
             probe.check_available(lambda ok: self._lock_ready(probe if ok else None))
+            FingerprintProbe()(self._fingerprint_ready)
 
     def _service_timeout(self) -> bool:
         if self.service_mode:
@@ -216,6 +218,11 @@ class PasswordsApplication(Adw.Application):
         self._authorizer = authorizer
         if self.window is not None:
             self.window.set_authorizer(authorizer)
+
+    def _fingerprint_ready(self, available: bool) -> None:  # noqa: FBT001
+        self._fingerprint_available = available
+        if self.window is not None:
+            self.window.set_fingerprint_available(available=available)
 
     @override
     def do_activate(self) -> None:
@@ -260,6 +267,7 @@ class PasswordsApplication(Adw.Application):
             self.window = MainWindow(
                 self, self.vault, self.settings, authorizer=self._authorizer, **kwargs
             )
+            self.window.set_fingerprint_available(available=self._fingerprint_available)
             self.window.connect("destroy", lambda *_a: setattr(self, "window", None))
             if self.service_mode:
                 self.service_mode = False
@@ -293,6 +301,7 @@ class PasswordsApplication(Adw.Application):
         dialog = PreferencesDialog(
             self.settings,
             lock_available=window.lock_available,
+            fingerprint_available=window.fingerprint_available,
             apple_id=status.apple_id if status is not None else "",
             on_sign_in=window.show_sign_in,
             on_sign_out=self.confirm_sign_out,
