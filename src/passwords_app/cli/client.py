@@ -3,8 +3,9 @@
 """Minimal async client of the daemon's D-Bus API for the command-line tool.
 
 Replies are unwrapped from Variants into plain Python values so the formatting code never
-sees D-Bus types. Calling a method auto-starts `passwords-appd` through D-Bus activation;
-if the name cannot be reached at all the call raises `DaemonUnreachableError`.
+sees D-Bus types. The CLI starts `passwords-appd` itself when nothing owns its name (see
+`cli/service.py`); a call to a name that still cannot be reached raises
+`DaemonUnreachableError`.
 """
 
 from __future__ import annotations
@@ -75,6 +76,20 @@ class DaemonClient:
 
     async def __aexit__(self, *_: object) -> None:
         self._bus.disconnect()
+
+    async def is_running(self) -> bool:
+        """Report whether anything owns the daemon's bus name, and so can answer a call."""
+        reply = await self._bus.call(
+            Message(
+                destination="org.freedesktop.DBus",
+                path="/org/freedesktop/DBus",
+                interface="org.freedesktop.DBus",
+                member="NameHasOwner",
+                signature="s",
+                body=[BUS_NAME],
+            )
+        )
+        return reply.message_type == MessageType.METHOD_RETURN and bool(reply.body[0])
 
     async def call(self, member: str, signature: str = "", *body: Any) -> list[Any]:  # noqa: ANN401
         reply = await self._bus.call(
