@@ -16,7 +16,7 @@ from typing import TYPE_CHECKING
 
 import requests
 
-from passwords_app.icloud import tls
+from passwords_app.icloud import const, tls
 from passwords_app.icloud.auth.headers import identity_headers
 from passwords_app.icloud.errors import AppleError
 from passwords_app.icloud.values import PLIST_ERRORS, Record, child, is_dict, mapping, text
@@ -35,6 +35,11 @@ ICLOUD_USER_AGENT = "com.apple.iCloudHelper/282 CFNetwork/1408.0.4 Darwin/22.5.0
 ICLOUD_CLIENT_INFO = (
     "<MacBookPro18,3> <Mac OS X;13.4.1;22F8> <com.apple.AOSKit/282 (com.apple.accountsd/113)>"
 )
+# loginDelegates takes the PET that GsService2 issued to the Windows identity and rejects it from
+# the Mac one ("entered incorrectly"); get_account_settings still wants the Mac identity.
+LOGIN_DELEGATES_CLIENT_INFO = (
+    f"{const.WINDOWS_PLATFORM} <com.apple.AOSKit/282 (com.apple.accountsd/113)>"
+)
 _TIMEOUT = 20
 _ALT_URL_KEYS = ("url", "escrowProxyUrl", "configURL", "wsUrl")
 
@@ -45,6 +50,22 @@ class ICloudError(AppleError):
 
 class ICloudAuthError(ICloudError):
     """The stored mmeAuthToken was refused; it must be re-minted from a fresh sign-in."""
+
+
+class LoginRejected(ICloudError):  # noqa: N818 - named for what Apple did, like WrongCode
+    """loginDelegates refused the PET; `status` is Apple's code."""
+
+    # With a PET from a good SRP login, status 1 ("entered incorrectly") means an untrusted device
+    # whose 2FA code Apple pushed by itself.
+    NEEDS_CODE = 1
+
+    def __init__(self, message: str, status: int) -> None:
+        super().__init__(message)
+        self.status = status
+
+    @property
+    def needs_code(self) -> bool:
+        return self.status == self.NEEDS_CODE
 
 
 def _basic(user: str, secret: str) -> str:
@@ -102,7 +123,7 @@ def login_mobileme(  # noqa: PLR0913, PLR0917 - mirrors the loginDelegates input
     headers = {
         "X-Apple-ADSID": adsid,
         "User-Agent": ICLOUD_USER_AGENT,
-        "X-Mme-Client-Info": ICLOUD_CLIENT_INFO,
+        "X-Mme-Client-Info": LOGIN_DELEGATES_CLIENT_INFO,
         "Accept": "*/*",
     }
     headers.update(identity_headers(device, anisette))
@@ -114,7 +135,7 @@ def login_mobileme(  # noqa: PLR0913, PLR0917 - mirrors the loginDelegates input
     if status != 0:
         why = text(mm, "status-message") or text(data, "status-message") or "unknown error"
         msg = f"loginDelegates status {status}: {why}"
-        raise ICloudError(msg)
+        raise LoginRejected(msg, status if isinstance(status, int) else -1)
 
     service_data = child(mm, "service-data")
     dsid = data.get("dsid") or child(service_data, "appleAccountInfo").get("dsid")

@@ -19,6 +19,7 @@ from __future__ import annotations
 
 import dataclasses
 import enum
+import logging
 import threading
 import time
 from http import HTTPStatus
@@ -48,6 +49,8 @@ if TYPE_CHECKING:
 
     from passwords_app.icloud.auth.anisette import AnisetteSource
     from passwords_app.sync.remote_icloud import ICloudRemoteStore
+
+logger = logging.getLogger(__name__)
 
 
 class AccountError(AppleError):
@@ -176,7 +179,17 @@ class Account:
                     return SignInStep.CODE
             except (GSAError, AnisetteError) as e:
                 raise AccountError(str(e)) from e
-            return self._complete(spd, apple_id, password)
+            try:
+                return self._complete(spd, apple_id, password)
+            except icloud_auth.LoginRejected as e:
+                # SRP passed (a wrong password stops at GSA), so "entered incorrectly" here means
+                # an untrusted device whose code Apple pushed by itself: ask for that code.
+                implied = grandslam.implied_factor(spd)
+                if not e.needs_code or implied is None:
+                    raise AccountError(str(e)) from e
+                logger.info("sign-in: loginDelegates wants the pushed code; asking for it")
+                self._pending = _Pending(gsa, apple_id, password, implied)
+                return SignInStep.CODE
 
     def submit_code(self, code: str) -> SignInStep:
         with self._lock:
@@ -193,7 +206,10 @@ class Account:
             except (GSAError, AnisetteError) as e:
                 raise AccountError(str(e)) from e
             self._pending = None
-            return self._complete(spd, pending.apple_id, pending.password)
+            try:
+                return self._complete(spd, pending.apple_id, pending.password)
+            except icloud_auth.LoginRejected as e:
+                raise AccountError(str(e)) from e
 
     def request_sms(self) -> SignInStep:
         """Send the verification code by text message instead of to trusted devices."""
@@ -224,6 +240,8 @@ class Account:
         try:
             self._mint_tokens(record, spd, apple_id)
             self._refresh_webservices(record)
+        except icloud_auth.LoginRejected:
+            raise
         except (GSAError, AnisetteError, icloud_auth.ICloudError) as e:
             raise AccountError(str(e)) from e
         self._sessions.save(record)

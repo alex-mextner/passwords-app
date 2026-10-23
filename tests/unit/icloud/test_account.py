@@ -272,6 +272,46 @@ def test_login_delegates_failure_is_an_account_error(
     assert account.status().signed_in is False
 
 
+def test_pushed_code_is_asked_for_when_login_delegates_refuses_the_pet(
+    account: acct.Account,
+    apple: ScriptedApple,
+    setup_server: Setup,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Windows-identity GSA: SRP passes without `au`, a code is pushed, loginDelegates says 1."""
+    spd_with_idms = {**ScriptedApple.spd(), "GsIdmsToken": "idms"}
+    monkeypatch.setattr(ScriptedApple, "spd", staticmethod(lambda: spd_with_idms))
+    setup_server.login_status = 1
+    assert account.sign_in(APPLE_ID, FAKE_PASSWORD) is acct.SignInStep.CODE
+    assert apple.triggered == []  # Apple already pushed it: do not send a second, competing code
+    assert account.status().signed_in is False
+    setup_server.login_status = 0
+    assert account.submit_code("123456") is acct.SignInStep.DEVICE
+    assert account.status().signed_in
+
+
+@pytest.mark.parametrize(
+    "refusal",
+    [(2, "idms"), (1, None)],
+    ids=["other-status", "no-idms-token-to-answer-with"],
+)
+def test_login_delegates_refusal_without_a_pushed_code_stays_an_error(
+    account: acct.Account,
+    apple: ScriptedApple,
+    setup_server: Setup,
+    monkeypatch: pytest.MonkeyPatch,
+    refusal: tuple[int, str | None],
+) -> None:
+    del apple
+    login_status, idms = refusal
+    spd = {**ScriptedApple.spd(), **({"GsIdmsToken": idms} if idms else {})}
+    monkeypatch.setattr(ScriptedApple, "spd", staticmethod(lambda: spd))
+    setup_server.login_status = login_status
+    with pytest.raises(acct.AccountError):
+        account.sign_in(APPLE_ID, FAKE_PASSWORD)
+    assert account.status().signed_in is False
+
+
 def test_re_sign_in_keeps_the_keychain_identity(
     account: acct.Account, apple: ScriptedApple
 ) -> None:

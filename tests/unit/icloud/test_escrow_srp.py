@@ -272,7 +272,7 @@ class GatedTests(unittest.TestCase):
         assert h["X-Apple-I-MD"] == "x"
         # X-Mme-Client-Info carries the AuthKit/sbd item and OVERWRITES the anisette value.
         assert h["X-Mme-Client-Info"] == (
-            "<MacBookPro18,3> <macOS;13.4.1;22F8> <com.apple.AuthKit/1 (com.apple.sbd/638.100.48)>"
+            "<PC> <Windows;6.2(0,0);9200> <com.apple.AuthKit/1 (com.apple.sbd/638.100.48)>"
         )
 
     def test_user_action_label_exact(self) -> None:
