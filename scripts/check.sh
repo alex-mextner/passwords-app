@@ -382,7 +382,14 @@ gate_bun-audit() {
   fi
   # node-forge via web-ext>adbkit: no fixed release; adbkit only parses ADB public keys, never
   # verifies signatures, and only for `web-ext run --target firefox-android` (unreachable here).
-  run_gate bun-audit bun -- in_extension bun audit --ignore GHSA-86w9-cpqp-85rv
+  # The exception expires: from the date below the ignore lapses and the gate fails again, so it
+  # is decided anew (a fixed node-forge may exist by then) instead of staying forever.
+  local -a ignore=(--ignore GHSA-86w9-cpqp-85rv)
+  local accepted_until=2026-12-31
+  if [[ $(date -u +%F) > $accepted_until ]]; then
+    ignore=()
+  fi
+  run_gate bun-audit bun -- in_extension bun audit "${ignore[@]}"
 }
 gate_bun-test() {
   if [[ ! -f extension/package.json ]]; then
