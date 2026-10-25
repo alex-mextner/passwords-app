@@ -10,6 +10,7 @@ from gi.repository import Adw, Gio, GObject, Gtk
 
 from passwords_app.app.constants import TRASH_RETENTION_DAYS
 from passwords_app.app.i18n import _, ngettext
+from passwords_app.app.ui.lock import idle_lock_hint
 
 if TYPE_CHECKING:
     from collections.abc import Callable
@@ -30,11 +31,12 @@ def clear_choice_text(seconds: int) -> str:
 class PreferencesDialog(Adw.PreferencesDialog):
     __gtype_name__ = "PasswordsPreferencesDialog"
 
-    def __init__(  # noqa: PLR0915 - builds every preference group; splitting scatters one layout
+    def __init__(  # noqa: PLR0913, PLR0915 - builds every preference group; splitting scatters one layout
         self,
         settings: Gio.Settings,
         *,
         lock_available: bool,
+        fingerprint_available: bool,
         apple_id: str,
         on_sign_in: Callable[[], None],
         on_sign_out: Callable[[], None],
@@ -85,7 +87,7 @@ class PreferencesDialog(Adw.PreferencesDialog):
         lock = Adw.PreferencesGroup(title=_("App Lock"))
         self.lock_row = Adw.SwitchRow(
             title=_("Lock When Idle"),
-            subtitle=_("Ask for your password or fingerprint after a period without use.")
+            subtitle=idle_lock_hint(fingerprint=fingerprint_available)
             if lock_available
             else _("Unavailable: the Passwords polkit policy is not installed."),
             sensitive=lock_available,
