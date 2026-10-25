@@ -22,6 +22,7 @@ from tests.fakes.icloud_session import APPLE_ID, DEVICE, make_session
 from passwords_app.core.model import Credential
 from passwords_app.icloud import account as acct
 from passwords_app.icloud.auth import grandslam
+from passwords_app.icloud.auth import icloud as icloud_auth
 from passwords_app.icloud.auth import session as sess
 from passwords_app.icloud.auth.gsa import CodeRejectedError, GSAError
 from passwords_app.icloud.escrow.srp import EscrowError, WrongEscrowPasscodeError
@@ -50,6 +51,9 @@ class Setup:
         self.calls: list[str] = []
         self.gateway = ""
         self.expire_next_settings = 0
+        # When set, get_account_settings answers 401 to any other X-Mme-Client-Info.
+        self.accept_only_client_info: str | None = None
+        self.settings_client_infos: list[str] = []
         outer = self
 
         class Handler(BaseHTTPRequestHandler):
@@ -60,7 +64,7 @@ class Setup:
             def do_POST(self) -> None:
                 self.rfile.read(int(self.headers.get("Content-Length") or 0))
                 outer.calls.append(self.path)
-                status, body = outer.answer(self.path)
+                status, body = outer.answer(self.path, self.headers.get("X-Mme-Client-Info", ""))
                 self.send_response(status)
                 self.send_header("Content-Length", str(len(body)))
                 self.end_headers()
@@ -78,7 +82,7 @@ class Setup:
         host, port = self.server.server_address[:2]
         return f"http://{host!s}:{port}"
 
-    def answer(self, path: str) -> tuple[int, bytes]:
+    def answer(self, path: str, client_info: str) -> tuple[int, bytes]:
         if path == "/login":
             mm = {
                 "status": self.login_status,
@@ -87,6 +91,9 @@ class Setup:
             return 200, plistlib.dumps(
                 {"dsid": "1234567890", "delegates": {"com.apple.mobileme": mm}}
             )
+        self.settings_client_infos.append(client_info)
+        if self.accept_only_client_info not in {None, client_info}:
+            return 401, b""
         if self.expire_next_settings:
             self.expire_next_settings -= 1
             return 401, plistlib.dumps({"ErrorID": "UNAUTHORIZED"})
@@ -272,6 +279,91 @@ def test_login_delegates_failure_is_an_account_error(
     assert account.status().signed_in is False
 
 
+def test_pushed_code_is_asked_for_when_login_delegates_refuses_the_pet(
+    account: acct.Account,
+    apple: ScriptedApple,
+    setup_server: Setup,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Windows-identity GSA: SRP passes without `au`, a code is pushed, loginDelegates says 1."""
+    spd_with_idms = {**ScriptedApple.spd(), "GsIdmsToken": "idms"}
+    monkeypatch.setattr(ScriptedApple, "spd", staticmethod(lambda: spd_with_idms))
+    setup_server.login_status = 1
+    assert account.sign_in(APPLE_ID, FAKE_PASSWORD) is acct.SignInStep.CODE
+    assert apple.triggered == []  # Apple already pushed it: do not send a second, competing code
+    assert account.status().signed_in is False
+    setup_server.login_status = 0
+    assert account.submit_code("123456") is acct.SignInStep.DEVICE
+    assert account.status().signed_in
+
+
+@pytest.mark.parametrize(
+    "refusal",
+    [(2, "idms"), (1, None)],
+    ids=["other-status", "no-idms-token-to-answer-with"],
+)
+def test_login_delegates_refusal_without_a_pushed_code_stays_an_error(
+    account: acct.Account,
+    apple: ScriptedApple,
+    setup_server: Setup,
+    monkeypatch: pytest.MonkeyPatch,
+    refusal: tuple[int, str | None],
+) -> None:
+    del apple
+    login_status, idms = refusal
+    spd = {**ScriptedApple.spd(), **({"GsIdmsToken": idms} if idms else {})}
+    monkeypatch.setattr(ScriptedApple, "spd", staticmethod(lambda: spd))
+    setup_server.login_status = login_status
+    with pytest.raises(acct.AccountError):
+        account.sign_in(APPLE_ID, FAKE_PASSWORD)
+    assert account.status().signed_in is False
+
+
+@pytest.mark.parametrize(
+    ("accepted", "requests_made"),
+    [
+        (icloud_auth.LOGIN_DELEGATES_CLIENT_INFO, 1),
+        (icloud_auth.ICLOUD_CLIENT_INFO, 2),
+    ],
+    ids=["windows-identity", "mac-identity"],
+)
+def test_sign_in_finishes_under_whichever_identity_get_account_settings_accepts(
+    account: acct.Account,
+    apple: ScriptedApple,
+    setup_server: Setup,
+    accepted: str,
+    requests_made: int,
+) -> None:
+    """A token minted under the Windows identity is asked for as a Windows client first, so a
+    fresh sign-in needs one request; a Mac-minted token saved by an old version needs a retry."""
+    del apple
+    setup_server.accept_only_client_info = accepted
+    assert account.sign_in(APPLE_ID, FAKE_PASSWORD) is acct.SignInStep.DEVICE
+    assert account.status().signed_in
+    assert setup_server.settings_client_infos[-1] == accepted
+    assert len(setup_server.settings_client_infos) == requests_made
+
+
+def test_sign_in_names_the_refusal_when_no_identity_is_accepted(
+    account: acct.Account, apple: ScriptedApple, setup_server: Setup
+) -> None:
+    """A token minted seconds ago is not 'expired': say that Apple refused it, and how."""
+    del apple
+    setup_server.settings_status = 401
+    with pytest.raises(acct.AccountError) as raised:
+        account.sign_in(APPLE_ID, FAKE_PASSWORD)
+    message = str(raised.value)
+    assert "HTTP 401" in message
+    assert "Windows" in message
+    assert "Mac" in message
+    assert "expired" not in message
+    assert account.status().signed_in is False
+    assert setup_server.settings_client_infos == [
+        icloud_auth.LOGIN_DELEGATES_CLIENT_INFO,
+        icloud_auth.ICLOUD_CLIENT_INFO,
+    ]
+
+
 def test_re_sign_in_keeps_the_keychain_identity(
     account: acct.Account, apple: ScriptedApple
 ) -> None:
@@ -329,7 +421,7 @@ def test_expired_token_is_re_minted_with_the_saved_password(
 ) -> None:
     account.sign_in(APPLE_ID, FAKE_PASSWORD)
     record = _record(account)
-    setup_server.expire_next_settings = 1
+    setup_server.expire_next_settings = 2  # Apple refuses the token under both identities
     account.refresh_tokens(record)
     assert apple.starts == 2
     assert setup_server.calls.count("/login") == 2

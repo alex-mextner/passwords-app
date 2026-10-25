@@ -9,6 +9,7 @@ Split into `start` and `finish` so a UI can ask for the code between the two cal
 from __future__ import annotations
 
 import dataclasses
+import logging
 from typing import TYPE_CHECKING, Literal
 
 from passwords_app.icloud.auth.gsa import GSAError
@@ -16,6 +17,8 @@ from passwords_app.icloud.values import Record, child, integer, text
 
 if TYPE_CHECKING:
     from passwords_app.icloud.auth.gsa import GSAClient
+
+logger = logging.getLogger(__name__)
 
 FactorKind = Literal["trusted", "sms"]
 _TRUSTED = "trustedDeviceSecondaryAuth"
@@ -47,16 +50,21 @@ def account_id(spd: Record) -> str | None:
     return str(numeric) if isinstance(numeric, (str, int)) and numeric else None
 
 
+def _ids(spd: Record) -> tuple[str, str] | None:
+    dsid = account_id(spd)
+    idms = text(spd, "GsIdmsToken") or text(spd, "GsIdMS")
+    return (dsid, idms) if dsid and idms else None
+
+
 def _factor(response: Record, spd: Record) -> SecondFactor | None:
     au = text(child(response, "Status"), "au")
     if au not in {_TRUSTED, _SECONDARY}:
         return None
-    dsid = account_id(spd)
-    idms = text(spd, "GsIdmsToken") or text(spd, "GsIdMS")
-    if not dsid or not idms:
+    ids = _ids(spd)
+    if ids is None:
         msg = "Apple asked for a second factor without the ids to answer it"
         raise GSAError(msg)
-    return SecondFactor("trusted" if au == _TRUSTED else "sms", dsid, idms)
+    return SecondFactor("trusted" if au == _TRUSTED else "sms", *ids)
 
 
 def start(gsa: GSAClient, username: str, password: str) -> tuple[Record, SecondFactor | None]:
@@ -66,7 +74,18 @@ def start(gsa: GSAClient, username: str, password: str) -> tuple[Record, SecondF
     user's devices, so only an interactive caller calls `trigger`.
     """
     response, spd = gsa.authenticate(username, password, "sign-in")
+    logger.debug("GSA sign-in answered: au=%r", text(child(response, "Status"), "au"))
     return spd, _factor(response, spd)
+
+
+def implied_factor(spd: Record) -> SecondFactor | None:
+    """Return the trusted-device factor Apple pushed on its own although `Status.au` named none.
+
+    Under the Windows client identity GrandSlam can answer SRP without `au` yet still send a code
+    to the user's devices and refuse the PET at loginDelegates until that code is entered.
+    """
+    ids = _ids(spd)
+    return SecondFactor("trusted", *ids) if ids else None
 
 
 def trigger(gsa: GSAClient, factor: SecondFactor) -> None:

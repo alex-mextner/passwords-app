@@ -19,6 +19,7 @@ from __future__ import annotations
 
 import dataclasses
 import enum
+import logging
 import threading
 import time
 from http import HTTPStatus
@@ -48,6 +49,8 @@ if TYPE_CHECKING:
 
     from passwords_app.icloud.auth.anisette import AnisetteSource
     from passwords_app.sync.remote_icloud import ICloudRemoteStore
+
+logger = logging.getLogger(__name__)
 
 
 class AccountError(AppleError):
@@ -176,7 +179,17 @@ class Account:
                     return SignInStep.CODE
             except (GSAError, AnisetteError) as e:
                 raise AccountError(str(e)) from e
-            return self._complete(spd, apple_id, password)
+            try:
+                return self._complete(spd, apple_id, password)
+            except icloud_auth.LoginRejected as e:
+                # SRP passed (a wrong password stops at GSA), so "entered incorrectly" here means
+                # an untrusted device whose code Apple pushed by itself: ask for that code.
+                implied = grandslam.implied_factor(spd)
+                if not e.needs_code or implied is None:
+                    raise AccountError(str(e)) from e
+                logger.info("sign-in: loginDelegates wants the pushed code; asking for it")
+                self._pending = _Pending(gsa, apple_id, password, implied)
+                return SignInStep.CODE
 
     def submit_code(self, code: str) -> SignInStep:
         with self._lock:
@@ -193,7 +206,10 @@ class Account:
             except (GSAError, AnisetteError) as e:
                 raise AccountError(str(e)) from e
             self._pending = None
-            return self._complete(spd, pending.apple_id, pending.password)
+            try:
+                return self._complete(spd, pending.apple_id, pending.password)
+            except icloud_auth.LoginRejected as e:
+                raise AccountError(str(e)) from e
 
     def request_sms(self) -> SignInStep:
         """Send the verification code by text message instead of to trusted devices."""
@@ -224,6 +240,8 @@ class Account:
         try:
             self._mint_tokens(record, spd, apple_id)
             self._refresh_webservices(record)
+        except icloud_auth.LoginRejected:
+            raise
         except (GSAError, AnisetteError, icloud_auth.ICloudError) as e:
             raise AccountError(str(e)) from e
         self._sessions.save(record)
@@ -263,16 +281,33 @@ class Account:
         record["mme"] = mme
 
     def _refresh_webservices(self, record: Record) -> None:
-        """Fetch the service URLs and a fresh cloudKitToken with the stored mmeAuthToken."""
-        status, data = icloud_auth.fetch_account_settings(
-            record,
-            self._device_identity(),
-            self._anisette,
-            url=self._endpoints.account_settings,
-            http=self._http,
-        )
-        if status == HTTPStatus.UNAUTHORIZED or data.get("ErrorID") == "UNAUTHORIZED":
-            msg = "iCloud credentials expired"
+        """Fetch the service URLs and a fresh cloudKitToken with the stored mmeAuthToken.
+
+        The token is asked for under the identity loginDelegates minted it with (Windows), and, for
+        a token saved by an earlier version that minted it as a Mac, once more as a Mac: which of
+        the two Apple honours is not documented, so neither is assumed. Only when both are
+        refused is the token reported as refused, with the HTTP status Apple answered; a refusal
+        says what Apple did, never that the credentials "expired".
+        """
+        status = HTTPStatus.UNAUTHORIZED.value
+        data: Record = {}
+        for platform, client_info in icloud_auth.ACCOUNT_SETTINGS_CLIENT_INFOS:
+            status, data = icloud_auth.fetch_account_settings(
+                record,
+                self._device_identity(),
+                self._anisette,
+                client_info=client_info,
+                url=self._endpoints.account_settings,
+                http=self._http,
+            )
+            if status != HTTPStatus.UNAUTHORIZED and data.get("ErrorID") != "UNAUTHORIZED":
+                break
+            logger.info(
+                "get_account_settings answered HTTP %s to the %s identity", status, platform
+            )
+        else:
+            platforms = " and as a ".join(p for p, _ in icloud_auth.ACCOUNT_SETTINGS_CLIENT_INFOS)
+            msg = f"iCloud refused the sign-in token (HTTP {status}), asked as a {platforms} client"
             raise icloud_auth.ICloudAuthError(msg)
         if data.get("status") not in {0, None}:
             msg = f"iCloud rejected the token: {data.get('status-message')}"
@@ -304,7 +339,10 @@ class Account:
             return
         apple_id, password = text(record, "username"), text(record, "password")
         if not apple_id or not password:
-            msg = "iCloud sign-in expired; sign in again"
+            msg = (
+                "Apple refused the saved sign-in token and no password is saved to get a new "
+                "one; sign in again"
+            )
             raise SignInRequired(msg)
         try:
             spd, factor = grandslam.start(self._gsa(), apple_id, password)

@@ -29,7 +29,7 @@ from cryptography.exceptions import InvalidTag
 from cryptography.hazmat.primitives.ciphers import Cipher, algorithms, modes
 from cryptography.hazmat.primitives.ciphers.aead import AESGCM
 
-from passwords_app.icloud import tls
+from passwords_app.icloud import const, tls
 from passwords_app.icloud.errors import AppleError
 from passwords_app.icloud.proto.codec import Writer
 from passwords_app.icloud.values import (
@@ -231,7 +231,7 @@ class EscrowRecovery:
     # escrowproxy wants the sbd UA + a fixed X-Mme-Client-Info that overwrites anisette's.
     ESCROW_USER_AGENT = "com.apple.sbd/638.100.48 com.apple.iCloudHelper/282"
     ESCROW_MME_CLIENT_INFO = (
-        "<MacBookPro18,3> <macOS;13.4.1;22F8> <com.apple.AuthKit/1 (com.apple.sbd/638.100.48)>"
+        f"{const.WINDOWS_PLATFORM} <com.apple.AuthKit/1 (com.apple.sbd/638.100.48)>"
     )
 
     def __init__(  # noqa: PLR0913 - the escrowproxy credentials plus test seams
