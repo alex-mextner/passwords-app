@@ -88,7 +88,8 @@ class PasswordsService(ServiceInterface):
     # ------------------------------------------------------------------ status and items
 
     @dbus_method(name="GetStatus")
-    def get_status(self) -> DBusDict:
+    async def get_status(self) -> DBusDict:
+        await self._d.until_started()
         self._d.touch()
         return self._d.status().to_dbus()
 

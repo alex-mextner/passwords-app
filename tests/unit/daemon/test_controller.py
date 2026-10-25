@@ -1231,3 +1231,12 @@ async def test_unreadable_saved_session_is_explained_not_just_signed_out(
     assert (status.state, status.message) == ("signed-out", MSG_SESSION_UNREADABLE)
     with pytest.raises(AuthRequiredError, match="Sign in again"):
         await unstarted.sync_now()
+
+
+async def test_status_is_not_answered_before_the_saved_account_was_read(unstarted: Daemon) -> None:
+    """The bus name is taken before start(): an early GetStatus must not get the default."""
+    waiting = asyncio.ensure_future(unstarted.until_started())
+    await asyncio.sleep(0)
+    assert not waiting.done()
+    await unstarted.start()
+    await asyncio.wait_for(waiting, timeout=1)
