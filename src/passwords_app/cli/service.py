@@ -102,15 +102,21 @@ class SystemdUserUnit:
         return "" if done is None else done.stdout
 
 
-def failure_cause(log: str, detail: str) -> str:
-    """Return the line that says why the daemon died: its last exception, else its last output."""
-    lines = [line.strip() for line in log.splitlines() if line.strip()]
+def _last_exception(lines: list[str]) -> str | None:
     exceptions = [m for line in lines if (m := _EXCEPTION_LINE.match(line))]
     # The daemon's own exceptions say more than the library ones they wrap, whichever order
     # the journal printed the chained traceback in.
     own = [m for m in exceptions if m.group(1).startswith("passwords_app.")]
-    if own or exceptions:
-        return (own or exceptions)[-1].group(2)
+    chosen = own or exceptions
+    return chosen[-1].group(2) if chosen else None
+
+
+def failure_cause(log: str, detail: str) -> str:
+    """Return the line that says why the daemon died: its last exception, else its last output."""
+    lines = [line.strip() for line in log.splitlines() if line.strip()]
+    exception = _last_exception(lines)
+    if exception is not None:
+        return exception
     output = [
         _LOG_PREFIX.sub("", line)
         for line in lines
