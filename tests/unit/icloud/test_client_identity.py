@@ -22,6 +22,6 @@ def test_account_settings_is_asked_as_a_windows_client_first_then_as_a_mac() -> 
     assert "Mac OS X" in icloud_auth.ICLOUD_CLIENT_INFO
     assert const.WINDOWS_PLATFORM not in icloud_auth.ICLOUD_CLIENT_INFO
     assert icloud_auth.ACCOUNT_SETTINGS_CLIENT_INFOS == (
-        icloud_auth.LOGIN_DELEGATES_CLIENT_INFO,
-        icloud_auth.ICLOUD_CLIENT_INFO,
+        ("Windows", icloud_auth.LOGIN_DELEGATES_CLIENT_INFO),
+        ("Mac", icloud_auth.ICLOUD_CLIENT_INFO),
     )

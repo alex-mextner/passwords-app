@@ -42,7 +42,10 @@ LOGIN_DELEGATES_CLIENT_INFO = (
 )
 # get_account_settings is asked under the identity the token was minted with (Windows, see
 # above) and, for a token saved by an earlier version that minted it as a Mac, once more as a Mac.
-ACCOUNT_SETTINGS_CLIENT_INFOS = (LOGIN_DELEGATES_CLIENT_INFO, ICLOUD_CLIENT_INFO)
+ACCOUNT_SETTINGS_CLIENT_INFOS = (
+    ("Windows", LOGIN_DELEGATES_CLIENT_INFO),
+    ("Mac", ICLOUD_CLIENT_INFO),
+)
 _TIMEOUT = 20
 _ALT_URL_KEYS = ("url", "escrowProxyUrl", "configURL", "wsUrl")
 

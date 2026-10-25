@@ -291,7 +291,7 @@ class Account:
         """
         status = HTTPStatus.UNAUTHORIZED.value
         data: Record = {}
-        for client_info in icloud_auth.ACCOUNT_SETTINGS_CLIENT_INFOS:
+        for platform, client_info in icloud_auth.ACCOUNT_SETTINGS_CLIENT_INFOS:
             status, data = icloud_auth.fetch_account_settings(
                 record,
                 self._device_identity(),
@@ -302,12 +302,12 @@ class Account:
             )
             if status != HTTPStatus.UNAUTHORIZED and data.get("ErrorID") != "UNAUTHORIZED":
                 break
-            logger.info("get_account_settings refused the token presented as %s", client_info)
-        else:
-            msg = (
-                f"iCloud refused the sign-in token (HTTP {status}), both when asked as a Windows "
-                "client and as a Mac"
+            logger.info(
+                "get_account_settings answered HTTP %s to the %s identity", status, platform
             )
+        else:
+            platforms = " and as a ".join(p for p, _ in icloud_auth.ACCOUNT_SETTINGS_CLIENT_INFOS)
+            msg = f"iCloud refused the sign-in token (HTTP {status}), asked as a {platforms} client"
             raise icloud_auth.ICloudAuthError(msg)
         if data.get("status") not in {0, None}:
             msg = f"iCloud rejected the token: {data.get('status-message')}"
