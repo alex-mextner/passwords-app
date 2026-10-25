@@ -14,9 +14,13 @@ uv pip install --python .venv/bin/python -e . --group dev
 uv pip install --python .venv/bin/python --no-deps pygobject-stubs
 ```
 
-Python tools (ruff, mypy, pyright, bandit, semgrep, pip-audit, reuse, codespell, vulture,
-deptry, xenon, yamllint, pytest) come from the `dev` group. The remaining binaries are
-installed per user, never with `sudo`:
+Python tools (ruff, mypy, pyright, bandit, pip-audit, reuse, codespell, vulture,
+deptry, xenon, yamllint, pytest) come from the `dev` group. semgrep does not: it pins `mcp` and
+the `opentelemetry` packages to exact versions that have open security advisories, so keeping
+it in the `dev` group would put those versions into `uv.lock` and fail pip-audit and
+dependency-review. `scripts/check.sh` runs it as an isolated tool through
+`uv tool run --from semgrep==<version>`; the version is `SEMGREP_VERSION` in that script and
+is bumped by hand. The remaining binaries are installed per user, never with `sudo`:
 
 | tool | install |
 |---|---|
@@ -58,7 +62,8 @@ a gate whose tool is missing fails and names the tool.
 | gui / e2e / browser | pytest `-m gui` / `-m e2e` / `-m browser`, one worker | |
 | bench | pytest `-m benchmark --benchmark-only` (budgets are asserted by the tests) | |
 
-`CHECK_OFFLINE=1` limits semgrep to the project rules, for machines without network access.
+`CHECK_OFFLINE=1` limits semgrep to the project rules, for machines without network access
+(uv still needs semgrep in its cache from an earlier run).
 `PYTEST_WORKERS` (default 2) sets xdist workers for unit and integration.
 
 The extension gates call the binaries in `extension/node_modules/.bin`, so

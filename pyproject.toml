@@ -59,7 +59,6 @@ dev = [
     "reuse>=5.0",
     "ruff>=0.12",
     "selenium>=4.33",
-    "semgrep>=1.120",
     "types-requests>=2.32",
     "vulture>=2.14",
     "xenon>=0.9",
