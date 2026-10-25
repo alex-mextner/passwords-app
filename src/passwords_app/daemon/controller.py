@@ -42,6 +42,7 @@ from passwords_app.daemon.items import apply_edit
 from passwords_app.daemon.scheduler import Scheduler
 from passwords_app.daemon.status import (
     MSG_NOT_JOINED,
+    MSG_SESSION_UNREADABLE,
     MSG_SIGNED_OUT,
     Status,
     outcome,
@@ -394,7 +395,10 @@ class Daemon:
             if info.signed_in:
                 self._set("signin-required", MSG_NOT_JOINED)
             else:
-                self._set("signed-out", MSG_SIGNED_OUT)
+                self._set(
+                    "signed-out",
+                    MSG_SESSION_UNREADABLE if info.session_unreadable else MSG_SIGNED_OUT,
+                )
             return
         async with self._lock:
             self._forget_other_account(self._apple_id)

@@ -38,6 +38,7 @@ class AccountInfo:
     apple_id: str | None
     signed_in: bool
     joined: bool
+    session_unreadable: bool = False
 
 
 @dataclass(frozen=True, slots=True)
@@ -105,6 +106,7 @@ class ICloudAccount:
             apple_id=cast("str | None", getattr(raw, "apple_id", None)),
             signed_in=bool(getattr(raw, "signed_in", False)),
             joined=bool(getattr(raw, "joined", False)),
+            session_unreadable=bool(getattr(raw, "session_unreadable", False)),
         )
 
     def sign_in(self, apple_id: str, password: str) -> str:

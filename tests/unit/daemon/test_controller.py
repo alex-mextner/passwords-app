@@ -32,6 +32,7 @@ from passwords_app.daemon.status import (
     MSG_LOCAL,
     MSG_NOT_JOINED,
     MSG_OFFLINE,
+    MSG_SESSION_UNREADABLE,
     MSG_SIGNED_OUT,
 )
 from passwords_app.sync.engine import UPLOAD_FAILURES_KEY
@@ -1217,3 +1218,16 @@ def test_status_message_for_signed_out_default(
 ) -> None:
     d = Daemon(account=account, local=local, state=state, clock=clock, notifier=notifier)
     assert (d.status().state, d.status().message) == ("signed-out", MSG_SIGNED_OUT)
+
+
+async def test_unreadable_saved_session_is_explained_not_just_signed_out(
+    account: FakeAccount, unstarted: Daemon
+) -> None:
+    account.signed_in = account.joined = False
+    account.apple_id = None
+    account.session_unreadable = True
+    await unstarted.start()
+    status = unstarted.status()
+    assert (status.state, status.message) == ("signed-out", MSG_SESSION_UNREADABLE)
+    with pytest.raises(AuthRequiredError, match="Sign in again"):
+        await unstarted.sync_now()

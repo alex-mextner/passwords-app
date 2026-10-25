@@ -80,6 +80,8 @@ class AccountStatus:
     apple_id: str | None
     signed_in: bool
     joined: bool
+    # A session file exists but this computer's keyring key cannot open it (so: signed out).
+    session_unreadable: bool = False
 
 
 @dataclasses.dataclass(frozen=True, slots=True)
@@ -133,6 +135,7 @@ class Account:
         # Bumped whenever the signed-in identity changes, so open stores reconnect.
         self._generation = 0
         self._unreadable_logged = False
+        self._session_unreadable = False
 
     # --- state ---------------------------------------------------------------------------------
 
@@ -151,12 +154,15 @@ class Account:
         here would stop the daemon from starting, and with it every way to sign in.
         """
         try:
-            return self._sessions.load()
+            record = self._sessions.load()
         except SessionError as exc:
+            self._session_unreadable = True
             if not self._unreadable_logged:
                 logger.warning("ignoring the saved iCloud session: %s", exc)
                 self._unreadable_logged = True
             return None
+        self._session_unreadable = False
+        return record
 
     def _signed_in_record(self) -> Record:
         record = self._record()
@@ -172,6 +178,7 @@ class Account:
                 apple_id=text(record, "username"),
                 signed_in=bool(text(child(record, "mme"), "mmeAuthToken")),
                 joined=octagon.is_joined(record),
+                session_unreadable=self._session_unreadable,
             )
 
     # --- sign-in ---------------------------------------------------------------------------------
