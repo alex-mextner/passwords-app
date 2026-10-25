@@ -36,10 +36,13 @@ ICLOUD_CLIENT_INFO = (
     "<MacBookPro18,3> <Mac OS X;13.4.1;22F8> <com.apple.AOSKit/282 (com.apple.accountsd/113)>"
 )
 # loginDelegates takes the PET that GsService2 issued to the Windows identity and rejects it from
-# the Mac one ("entered incorrectly"); get_account_settings still wants the Mac identity.
+# the Mac one ("entered incorrectly").
 LOGIN_DELEGATES_CLIENT_INFO = (
     f"{const.WINDOWS_PLATFORM} <com.apple.AOSKit/282 (com.apple.accountsd/113)>"
 )
+# get_account_settings is asked under the identity the token was minted with (Windows, see
+# above) and, for a token saved by an earlier version that minted it as a Mac, once more as a Mac.
+ACCOUNT_SETTINGS_CLIENT_INFOS = (LOGIN_DELEGATES_CLIENT_INFO, ICLOUD_CLIENT_INFO)
 _TIMEOUT = 20
 _ALT_URL_KEYS = ("url", "escrowProxyUrl", "configURL", "wsUrl")
 
@@ -146,17 +149,20 @@ def login_mobileme(  # noqa: PLR0913, PLR0917 - mirrors the loginDelegates input
     return str(dsid), token, service_data, data
 
 
-def fetch_account_settings(
+def fetch_account_settings(  # noqa: PLR0913 - the options are one-to-one request inputs
     record: Record,
     device: Device,
     anisette: AnisetteSource,
     *,
+    client_info: str = LOGIN_DELEGATES_CLIENT_INFO,
     url: str = ACCOUNT_SETTINGS_URL,
     http: requests.Session | None = None,
 ) -> tuple[int, Record]:
     """With the stored mmeAuthToken, fetch the account/webservices settings.
 
-    Auth is `Basic base64(dsid:mmeAuthToken)`. Returns (http_status, parsed_plist).
+    Auth is `Basic base64(dsid:mmeAuthToken)`. `client_info` is the device description Apple
+    sees; a token minted under one platform may be refused under another. Returns
+    (http_status, parsed_plist).
     """
     mme = child(record, "mme")
     dsid = mme.get("dsid")
@@ -167,7 +173,7 @@ def fetch_account_settings(
 
     headers = {
         "Authorization": _basic(str(dsid), token),
-        "X-Mme-Client-Info": ICLOUD_CLIENT_INFO,
+        "X-Mme-Client-Info": client_info,
         "User-Agent": ICLOUD_USER_AGENT,
         "Accept": "*/*",
     }

@@ -1,10 +1,11 @@
 # SPDX-FileCopyrightText: 2026 Alex Mextner
 # SPDX-License-Identifier: MIT
-"""Static identity strings used to impersonate a Mac to Apple's GrandSlam service.
+"""Static identity strings sent to Apple's GrandSlam service.
 
-These mirror what AltServer / pypush send. Apple tracks some of these, so they are
-kept stable and Mac-like. The volatile per-request machine data (X-Apple-I-MD*) comes
-from the anisette server, not from here.
+Apple tracks these, so they are kept stable. Since 2026-10-12 the sign-in endpoints must be
+told the platform the anisette data comes from (Windows), not a Mac: see `WINDOWS_PLATFORM`.
+The volatile per-request machine data (X-Apple-I-MD*) comes from the anisette server, not
+from here.
 """
 
 # Sent as the GsService2 User-Agent.
