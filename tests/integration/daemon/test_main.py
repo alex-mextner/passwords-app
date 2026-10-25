@@ -5,6 +5,7 @@
 from __future__ import annotations
 
 import asyncio
+import sqlite3
 import stat
 from typing import TYPE_CHECKING
 
@@ -124,6 +125,57 @@ async def test_open_state_creates_a_private_db_keyed_from_the_keyring(
     again = await main.open_state(bus)
     assert again.get("probe") == "value"
     again.close()
+
+
+async def test_open_state_sets_aside_a_database_the_keyring_key_cannot_open(
+    private_session: PrivateSession, bus: MessageBus
+) -> None:
+    # state.db was written under the key of a keyring that no longer exists on this machine.
+    path = paths.state_path()
+    with StateStore(path, STATE_KEY) as old:
+        old.set("account", "someone@example.com")
+    store = await main.open_state(bus)
+    assert store.get("account") is None  # a fresh database, usable
+    store.set("probe", "value")
+    store.close()
+    (kept,) = path.parent.glob("state.db.unreadable-*")
+    with StateStore(kept, STATE_KEY) as old:  # nothing was destroyed
+        assert old.get("account") == "someone@example.com"
+    again = await main.open_state(bus)
+    assert again.get("probe") == "value"  # and it is not set aside again
+    again.close()
+    assert len(list(path.parent.glob("state.db.unreadable-*"))) == 1
+
+
+async def test_open_state_sets_aside_a_file_that_is_not_a_database(
+    private_session: PrivateSession, bus: MessageBus
+) -> None:
+    path = paths.state_path()
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_bytes(b"this is not an sqlite database" * 100)
+    store = await main.open_state(bus)
+    store.set("probe", "value")
+    store.close()
+    (kept,) = path.parent.glob("state.db.unreadable-*")
+    assert kept.read_bytes().startswith(b"this is not")
+
+
+async def test_open_state_leaves_a_database_that_is_merely_busy_alone(
+    private_session: PrivateSession, bus: MessageBus, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    path = paths.state_path()
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_bytes(b"live data another process is using")
+
+    def busy(*_args: object, **_kwargs: object) -> None:
+        msg = "database is locked"
+        raise sqlite3.OperationalError(msg)
+
+    monkeypatch.setattr("passwords_app.store.state.sqlite3.connect", busy)
+    with pytest.raises(sqlite3.OperationalError):
+        await main.open_state(bus)
+    assert path.read_bytes() == b"live data another process is using"
+    assert not list(path.parent.glob("state.db.unreadable-*"))
 
 
 async def test_build_daemon_uses_the_real_keyring(

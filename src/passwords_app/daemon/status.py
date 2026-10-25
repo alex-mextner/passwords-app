@@ -23,6 +23,10 @@ if TYPE_CHECKING:
     from passwords_app.sync.ports import PendingDeletions, SyncReport, SyncState
 
 MSG_SIGNED_OUT = "Not signed in to iCloud."
+MSG_SESSION_UNREADABLE = (
+    "The saved iCloud sign-in cannot be opened on this computer: it was made on another "
+    "computer, or this computer's keyring was reset. Sign in again."
+)
 MSG_NOT_JOINED = (
     "Finish signing in: confirm with a device passcode so this computer can join your "
     "iCloud Keychain."

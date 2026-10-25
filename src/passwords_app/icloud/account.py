@@ -31,7 +31,7 @@ from passwords_app.icloud.auth import icloud as icloud_auth
 from passwords_app.icloud.auth.anisette import Anisette, AnisetteError
 from passwords_app.icloud.auth.device import Device
 from passwords_app.icloud.auth.gsa import CodeRejectedError, GSAClient, GSAError
-from passwords_app.icloud.auth.session import SessionStore
+from passwords_app.icloud.auth.session import SessionError, SessionStore
 from passwords_app.icloud.errors import AppleError
 from passwords_app.icloud.escrow.srp import EscrowError, WrongEscrowPasscodeError
 from passwords_app.icloud.keychain.client import Identity, KeychainClient
@@ -80,6 +80,8 @@ class AccountStatus:
     apple_id: str | None
     signed_in: bool
     joined: bool
+    # A session file exists but this computer's keyring key cannot open it (so: signed out).
+    session_unreadable: bool = False
 
 
 @dataclasses.dataclass(frozen=True, slots=True)
@@ -132,6 +134,8 @@ class Account:
         self._device: Device | None = None
         # Bumped whenever the signed-in identity changes, so open stores reconnect.
         self._generation = 0
+        self._unreadable_logged = False
+        self._session_unreadable = False
 
     # --- state ---------------------------------------------------------------------------------
 
@@ -142,7 +146,23 @@ class Account:
         return self._device
 
     def _record(self) -> Record | None:
-        return self._sessions.load()
+        """Return the saved session, or None when there is none or this computer cannot read it.
+
+        A session saved under a key the keyring no longer has (the keyring was replaced, or
+        the files were copied from another computer) is as good as no session: the only way
+        forward is to sign in again, which saves a new one under the current key. Raising
+        here would stop the daemon from starting, and with it every way to sign in.
+        """
+        try:
+            record = self._sessions.load()
+        except SessionError as exc:
+            self._session_unreadable = True
+            if not self._unreadable_logged:
+                logger.warning("ignoring the saved iCloud session: %s", exc)
+                self._unreadable_logged = True
+            return None
+        self._session_unreadable = False
+        return record
 
     def _signed_in_record(self) -> Record:
         record = self._record()
@@ -158,6 +178,7 @@ class Account:
                 apple_id=text(record, "username"),
                 signed_in=bool(text(child(record, "mme"), "mmeAuthToken")),
                 joined=octagon.is_joined(record),
+                session_unreadable=self._session_unreadable,
             )
 
     # --- sign-in ---------------------------------------------------------------------------------

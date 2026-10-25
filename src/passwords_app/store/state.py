@@ -74,6 +74,26 @@ class StateSchemaError(StateError):
     """state.db was written by a newer version of the app."""
 
 
+def set_aside(path: Path, now: datetime | None = None) -> Path:
+    """Move an unusable state.db (and its WAL side files) out of the way; returns the new path.
+
+    The file is kept, not deleted: a keyring that comes back could still open it. The side files
+    move first so a crash in between cannot leave a stale WAL next to a replacement database.
+    """
+    stamp = (now or datetime.now(UTC)).astimezone(UTC).strftime("%Y%m%dT%H%M%SZ")
+    kept = path.with_name(f"{path.name}.unreadable-{stamp}")
+    number = 1
+    while kept.exists():  # rename() would silently replace an earlier set-aside of the same second
+        number += 1
+        kept = path.with_name(f"{path.name}.unreadable-{stamp}-{number}")
+    for suffix in ("-wal", "-shm"):
+        side = path.with_name(path.name + suffix)
+        if side.exists():
+            side.rename(kept.with_name(kept.name + suffix))
+    path.rename(kept)
+    return kept
+
+
 def _ts(value: datetime) -> str:
     # Fixed-width UTC text sorts chronologically, which `purge_older_than` relies on.
     return value.astimezone(UTC).strftime("%Y-%m-%dT%H:%M:%S.%fZ")
@@ -176,6 +196,37 @@ class StateStore:
             # executescript() commits implicitly, so the version bump lives in the same
             # explicit transaction to keep a crash from leaving a half-migrated file.
             self._db.executescript(f"BEGIN;\n{script}\nPRAGMA user_version = {version};\nCOMMIT;")
+
+    def matches_key(self) -> bool:
+        """Say whether this key opens what is stored (False: the file was written under another).
+
+        Opens one encrypted row of each table that has any. A key that fits opens every row, so
+        only when all of the probed rows fail is it the key that is wrong; a single damaged row
+        among readable ones stays a `StateCorruptedError` raised when that row is used. With a
+        single probed row the two cases cannot be told apart and the file counts as foreign: it
+        is set aside, not deleted.
+        """
+        probes: list[tuple[bytes, bytes]] = []  # (sealed blob, associated data)
+        kv = self._db.execute("SELECT blob, key FROM kv LIMIT 1").fetchone()
+        if kv is not None:
+            probes.append((kv[0], self._kv_aad(kv[1])))
+        base = self._db.execute("SELECT blob, item_id, etag FROM bases LIMIT 1").fetchone()
+        if base is not None:
+            probes.append((base[0], self._base_aad(base[1], base[2])))
+        trash = self._db.execute(
+            "SELECT blob, trash_id, deleted_at, reason FROM trash LIMIT 1"
+        ).fetchone()
+        if trash is not None:
+            probes.append((trash[0], self._trash_aad(trash[1], trash[2], trash[3])))
+        outcomes: list[bool] = []
+        for blob, aad in probes:
+            try:
+                self._open(blob, aad)
+            except StateCorruptedError:
+                outcomes.append(False)
+            else:
+                outcomes.append(True)
+        return not outcomes or any(outcomes)
 
     # ------------------------------------------------------------------ crypto
 

@@ -59,6 +59,7 @@ class Status:
     apple_id: str | None
     signed_in: bool
     joined: bool
+    session_unreadable: bool = False
 
 
 @dataclass(frozen=True)
@@ -76,6 +77,7 @@ class Account:
         self.config_dir = config_dir
         self.anisette_url = anisette_url
         self.raise_next: BaseException | None = None
+        self.session_unreadable = False
         self.args: list[tuple[Any, ...]] = []
         Account.instances.append(self)
 
@@ -87,7 +89,12 @@ class Account:
 
     def status(self) -> Status:
         self._go()
-        return Status("alice@example.com", signed_in=True, joined=False)
+        return Status(
+            "alice@example.com",
+            signed_in=True,
+            joined=False,
+            session_unreadable=self.session_unreadable,
+        )
 
     def sign_in(self, apple_id: str, password: str) -> SignInStep:
         self._go(apple_id, password)
@@ -145,6 +152,11 @@ def test_load_passes_config(module: types.ModuleType, tmp_path: Path) -> None:
 
 def test_status_is_converted(adapter: ICloudAccount) -> None:
     assert adapter.status() == AccountInfo("alice@example.com", signed_in=True, joined=False)
+
+
+def test_status_forwards_an_unreadable_session(adapter: ICloudAccount) -> None:
+    real(adapter).session_unreadable = True
+    assert adapter.status().session_unreadable is True
 
 
 @pytest.mark.parametrize(

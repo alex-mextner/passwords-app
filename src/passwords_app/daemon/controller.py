@@ -42,6 +42,7 @@ from passwords_app.daemon.items import apply_edit
 from passwords_app.daemon.scheduler import Scheduler
 from passwords_app.daemon.status import (
     MSG_NOT_JOINED,
+    MSG_SESSION_UNREADABLE,
     MSG_SIGNED_OUT,
     Status,
     outcome,
@@ -312,8 +313,15 @@ class Daemon:
         self._unsettled_trash: dict[str, TrashEntry] = {}
         self.on_status: Callable[[Status], None] | None = None
         self.on_items: Callable[[list[str]], None] | None = None
+        # The bus name is taken before `start()` has read the account, so a client answered in
+        # that gap would be told the construction default ("signed out") as if it were true.
+        self._started = asyncio.Event()
 
     # ------------------------------------------------------------------ lifecycle
+
+    async def until_started(self) -> None:
+        """Return once `start()` has adopted the saved account state."""
+        await self._started.wait()
 
     async def start(self) -> None:
         info = await asyncio.to_thread(self._account.status)
@@ -322,6 +330,7 @@ class Daemon:
             asyncio.create_task(self.scheduler.run(), name="scheduler"),
             asyncio.create_task(self._watch_local(), name="keyring-watch"),
         ]
+        self._started.set()
 
     async def stop(self) -> None:
         tasks = [*self._tasks, *([self._echo_check] if self._echo_check else [])]
@@ -394,7 +403,10 @@ class Daemon:
             if info.signed_in:
                 self._set("signin-required", MSG_NOT_JOINED)
             else:
-                self._set("signed-out", MSG_SIGNED_OUT)
+                self._set(
+                    "signed-out",
+                    MSG_SESSION_UNREADABLE if info.session_unreadable else MSG_SIGNED_OUT,
+                )
             return
         async with self._lock:
             self._forget_other_account(self._apple_id)

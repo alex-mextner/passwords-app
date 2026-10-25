@@ -25,6 +25,12 @@ from typing import TYPE_CHECKING, Any
 from passwords_app.cli import format as fmt
 from passwords_app.cli.client import DaemonCallError, DaemonClient, DaemonUnreachableError
 from passwords_app.cli.installer import ScriptNotFoundError, run_script
+from passwords_app.cli.service import (
+    DaemonStartError,
+    ServiceUnit,
+    SystemdUserUnit,
+    ensure_running,
+)
 from passwords_app.cli.signin import (
     ConsoleTerminal,
     SignInBlockedError,
@@ -91,10 +97,14 @@ class Context:
     """What a command needs besides its arguments (replaced in tests)."""
 
     def __init__(
-        self, terminal: Terminal | None = None, now: Callable[[], datetime] | None = None
+        self,
+        terminal: Terminal | None = None,
+        now: Callable[[], datetime] | None = None,
+        service: ServiceUnit | None = None,
     ) -> None:
         self.terminal = terminal or ConsoleTerminal()
         self.now = now or (lambda: datetime.now(UTC))
+        self.service = service or SystemdUserUnit()
 
     def out(self, text: str = "") -> None:
         self.terminal.say(text)
@@ -271,6 +281,7 @@ _DAEMON_COMMANDS: dict[
 async def _with_daemon(args: argparse.Namespace, ctx: Context) -> int:
     command = _DAEMON_COMMANDS[args.command]
     async with await DaemonClient.connect() as client:
+        await ensure_running(client.is_running, ctx.service)
         return await command(client, args, ctx)
 
 
@@ -296,6 +307,12 @@ def _explain(exc: BaseException) -> tuple[str, str, int]:
         case DaemonCallError(short=short):
             message, hint = str(exc), _ERROR_HINTS.get(short, "")
             code = _ERROR_EXITS.get(short, EXIT_FAILED)
+        case DaemonStartError():
+            message, hint, code = (
+                f"the sync service could not be started: {exc}.",
+                "Full log: `journalctl --user -u passwords-appd`. Then `passwords-app doctor`.",
+                EXIT_DAEMON,
+            )
         case CliError(code=cli_code, hint=cli_hint):
             message, hint, code = str(exc), cli_hint, cli_code
         case SignInCancelledError():
@@ -340,6 +357,7 @@ def main(argv: Sequence[str] | None = None, *, ctx: Context | None = None) -> in
         return _run(args, ctx)
     except (
         DaemonUnreachableError,
+        DaemonStartError,
         DaemonCallError,
         CliError,
         SignInCancelledError,

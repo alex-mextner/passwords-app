@@ -210,6 +210,36 @@ def test_fresh_computer_is_signed_out(account: acct.Account) -> None:
     assert account.status() == acct.AccountStatus(apple_id=None, signed_in=False, joined=False)
 
 
+def test_session_the_key_cannot_open_is_signed_out(account: acct.Account) -> None:
+    # The keyring was replaced since the session was saved: the file is there but unreadable.
+    account.paths.ensure()
+    account.paths.session.write_bytes(bytes(range(64)))
+    assert account.status() == acct.AccountStatus(
+        apple_id=None, signed_in=False, joined=False, session_unreadable=True
+    )
+    with pytest.raises(acct.SignInRequired):
+        account.open_keychain()
+
+
+def test_signing_in_replaces_a_session_the_key_could_not_open(
+    account: acct.Account, apple: ScriptedApple, setup_server: Setup
+) -> None:
+    del apple
+    account.paths.ensure()
+    account.paths.session.write_bytes(bytes(range(64)))
+    assert account.status().session_unreadable
+    assert account.sign_in(APPLE_ID, FAKE_PASSWORD) is acct.SignInStep.DEVICE
+    assert account.status() == acct.AccountStatus(APPLE_ID, signed_in=True, joined=False)
+    # A restart of the daemon: new process, empty key cache, same files and key store.
+    sess.forget_cached_keys()
+    endpoints = acct.Endpoints(
+        login_delegates=f"{setup_server.url}/login",
+        account_settings=f"{setup_server.url}/settings",
+    )
+    restarted = acct.Account(account.paths.root, anisette=NoAnisette(), endpoints=endpoints)
+    assert restarted.status() == acct.AccountStatus(APPLE_ID, signed_in=True, joined=False)
+
+
 def test_default_config_dir(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path))
     assert acct.Account(anisette=NoAnisette()).paths.root == tmp_path / "passwords-app"

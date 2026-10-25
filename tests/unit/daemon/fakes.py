@@ -43,6 +43,7 @@ class FakeAccount:
     apple_id: str | None = None
     signed_in: bool = False
     joined: bool = False
+    session_unreadable: bool = False  # a saved session exists that this computer cannot open
     needs_code: bool = True
     known_member: bool = False  # Apple already trusts this computer: sign-in ends at "done"
     calls: list[str] = field(default_factory=list)
@@ -60,7 +61,7 @@ class FakeAccount:
 
     def status(self) -> AccountInfo:
         self._enter("status")
-        return AccountInfo(self.apple_id, self.signed_in, self.joined)
+        return AccountInfo(self.apple_id, self.signed_in, self.joined, self.session_unreadable)
 
     def sign_in(self, apple_id: str, password: str) -> str:
         self._enter("sign_in")

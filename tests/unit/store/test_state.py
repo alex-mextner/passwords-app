@@ -24,6 +24,7 @@ from passwords_app.store.state import (
     StateCorruptedError,
     StateSchemaError,
     StateStore,
+    set_aside,
 )
 from passwords_app.sync.plan import BaseEntry
 from passwords_app.sync.ports import PendingDeletions
@@ -147,6 +148,63 @@ def test_wrong_key_cannot_read_rows(db_path: Path) -> None:
         s.set_base(BaseEntry(rich(), "e1"))
     with StateStore(db_path, OTHER_KEY) as s, pytest.raises(StateCorruptedError):
         s.bases()
+
+
+def test_store_matches_its_key_when_empty_or_written_with_it(db_path: Path) -> None:
+    with StateStore(db_path, KEY) as s:
+        assert s.matches_key()
+        s.set("k", "v")
+        s.set_base(BaseEntry(rich(), "e1"))
+        assert s.matches_key()
+
+
+def test_store_written_with_another_key_does_not_match(db_path: Path) -> None:
+    with StateStore(db_path, KEY) as s:
+        s.set("k", "v")
+        s.set_base(BaseEntry(rich(), "e1"))
+    with StateStore(db_path, OTHER_KEY) as s:
+        assert not s.matches_key()
+
+
+def test_one_damaged_row_among_readable_ones_is_not_a_wrong_key(db_path: Path) -> None:
+    with StateStore(db_path, KEY) as s:
+        s.set("k", "v")
+        s.set_base(BaseEntry(rich(), "e1"))
+    with closing(sqlite3.connect(db_path)) as db:
+        db.execute("UPDATE kv SET blob = ?", (bytes(40),))
+        db.commit()
+    with StateStore(db_path, KEY) as s:
+        assert s.matches_key()  # the bases still open: only the kv row is damaged
+        with pytest.raises(StateCorruptedError):
+            s.get("k")
+
+
+def test_set_aside_keeps_the_unreadable_file_and_its_side_files(db_path: Path) -> None:
+    with StateStore(db_path, KEY) as s:
+        s.set("k", "v")
+    for suffix in ("-wal", "-shm"):  # a clean close removes them; a crash leaves them
+        db_path.with_name(db_path.name + suffix).write_bytes(b"side")
+    kept = set_aside(db_path, datetime(2026, 10, 22, 18, 30, 5, tzinfo=UTC))
+    assert kept.name == "state.db.unreadable-20261022T183005Z"
+    assert not db_path.exists()
+    assert kept.read_bytes()
+    assert kept.with_name(kept.name + "-wal").read_bytes() == b"side"
+    assert kept.with_name(kept.name + "-shm").read_bytes() == b"side"
+    assert not db_path.with_name(db_path.name + "-wal").exists()
+    assert stat.S_IMODE(kept.stat().st_mode) == 0o600
+    with StateStore(db_path, KEY) as fresh:  # a new, empty store takes its place
+        assert fresh.get("k") is None
+
+
+def test_set_aside_twice_in_one_second_keeps_both(db_path: Path) -> None:
+    moment = datetime(2026, 10, 22, 18, 30, 5, tzinfo=UTC)
+    db_path.parent.mkdir(parents=True, exist_ok=True)
+    db_path.write_bytes(b"first")
+    first = set_aside(db_path, moment)
+    db_path.write_bytes(b"second")
+    second = set_aside(db_path, moment)
+    assert second.name == first.name + "-2"
+    assert (first.read_bytes(), second.read_bytes()) == (b"first", b"second")
 
 
 def test_secrets_never_hit_the_file_in_plaintext(db_path: Path) -> None:
