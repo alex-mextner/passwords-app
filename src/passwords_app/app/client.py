@@ -162,8 +162,14 @@ class DaemonClient:
     ) -> None:
         """Forward StatusChanged and ItemsChanged; malformed signals are dropped."""
 
-        def status_signal(*args: object) -> None:
-            params = cast("GLib.Variant", args[5])
+        def status_signal(
+            _connection: Gio.DBusConnection,
+            _sender: str | None,
+            _object_path: str,
+            _interface: str,
+            _signal: str,
+            params: GLib.Variant,
+        ) -> None:
             if params.get_type_string() != "(a{sv})":
                 return
             try:
@@ -172,8 +178,14 @@ class DaemonClient:
             except (ReplyError, ValueError, TypeError):
                 return
 
-        def items_signal(*args: object) -> None:
-            params = cast("GLib.Variant", args[5])
+        def items_signal(
+            _connection: Gio.DBusConnection,
+            _sender: str | None,
+            _object_path: str,
+            _interface: str,
+            _signal: str,
+            params: GLib.Variant,
+        ) -> None:
             if params.get_type_string() != "(as)":
                 return
             (ids,) = cast("tuple[list[str]]", params.unpack())

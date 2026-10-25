@@ -100,10 +100,12 @@ class CodeBoxes(Gtk.Box):
             entry.add_css_class("code-box")
             name = _("Digit {n} of {total}").format(n=index + 1, total=SIGNIN_CODE_LENGTH)
             # The focusable text inside the entry is what a screen reader lands on.
-            parts: list[object] = [entry, entry.get_delegate()]
-            for accessible in parts:
-                if isinstance(accessible, Gtk.Accessible):
-                    accessible.update_property([Gtk.AccessibleProperty.LABEL], [name])
+            labelled: list[Gtk.Widget] = [entry]
+            delegate = entry.get_delegate()
+            if isinstance(delegate, Gtk.Text):
+                labelled.append(delegate)
+            for widget in labelled:
+                widget.update_property([Gtk.AccessibleProperty.LABEL], [name])
             entry.connect("changed", self._on_changed, index)
             # Capture phase: the boxes, not the text widget, decide what Backspace erases.
             keys = Gtk.EventControllerKey(propagation_phase=Gtk.PropagationPhase.CAPTURE)

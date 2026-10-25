@@ -50,8 +50,10 @@ _SECTION_NAMES = {
 
 
 def _is_editable(widget: object) -> bool:
-    # Text widgets implement the Gtk.Editable interface (the stubs model it apart from Widget).
-    return isinstance(widget, Gtk.Editable)
+    # Text widgets implement the Gtk.Editable interface. The stubs declare it a Protocol that
+    # is not runtime_checkable, but at runtime it is a real GObject interface class that
+    # isinstance accepts, so the stub's claim is bypassed here and nowhere else.
+    return isinstance(widget, cast("type[object]", Gtk.Editable))
 
 
 class MainWindow(Adw.ApplicationWindow):

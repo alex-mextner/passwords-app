@@ -235,6 +235,13 @@ gate_bandit() {
   run_gate bandit bandit -- "$(tool bandit)" --configfile pyproject.toml --recursive --quiet src
 }
 
+# semgrep is not a dev dependency: it pins mcp and opentelemetry to exact versions that have
+# open advisories, which would put them into uv.lock and the pip-audit closure with no way to
+# upgrade them from here. It runs as an isolated, version-pinned tool instead (uv caches the
+# environment, so only the first run needs the network). Bump SEMGREP_VERSION by hand.
+SEMGREP_VERSION=1.182.1
+run_semgrep() { uv tool run --from "semgrep==$SEMGREP_VERSION" semgrep "$@"; }
+
 # Registry packs need the network; the project rules in .semgrep/ always run, so an offline
 # machine still enforces the repository-specific bans.
 semgrep_args() {
@@ -248,7 +255,7 @@ semgrep_args() {
 gate_semgrep() {
   local -a args
   mapfile -t args < <(semgrep_args)
-  run_gate semgrep semgrep -- "$(tool semgrep)" "${args[@]}" src tests scripts
+  run_gate semgrep uv -- run_semgrep "${args[@]}" src tests scripts
 }
 
 # Audits the declared dependency closure, not the venv: the venv sees Ubuntu's system
@@ -375,7 +382,14 @@ gate_bun-audit() {
   fi
   # node-forge via web-ext>adbkit: no fixed release; adbkit only parses ADB public keys, never
   # verifies signatures, and only for `web-ext run --target firefox-android` (unreachable here).
-  run_gate bun-audit bun -- in_extension bun audit --ignore GHSA-86w9-cpqp-85rv
+  # The exception expires: from the date below the ignore lapses and the gate fails again, so it
+  # is decided anew (a fixed node-forge may exist by then) instead of staying forever.
+  local -a ignore=(--ignore GHSA-86w9-cpqp-85rv)
+  local accepted_until=2026-12-31
+  if [[ $(date -u +%F) > $accepted_until ]]; then
+    ignore=()
+  fi
+  run_gate bun-audit bun -- in_extension bun audit "${ignore[@]}"
 }
 gate_bun-test() {
   if [[ ! -f extension/package.json ]]; then
@@ -393,7 +407,7 @@ gate_semgrep-ts() {
     skip semgrep-ts "no extension/"
     return
   fi
-  run_gate semgrep-ts semgrep -- "$(tool semgrep)" scan --metrics=off --error --quiet \
+  run_gate semgrep-ts uv -- run_semgrep scan --metrics=off --error --quiet \
     --config p/typescript --config p/secrets --exclude node_modules --exclude dist extension
 }
 
