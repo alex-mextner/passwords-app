@@ -171,6 +171,40 @@ async def test_device_step_leaves_sign_in_required(daemon: Daemon) -> None:
     )
 
 
+async def test_only_a_session_waiting_for_the_passcode_is_join_pending(
+    account: FakeAccount, daemon: Daemon
+) -> None:
+    assert not daemon.status().join_pending  # signed out
+    assert not daemon.status().to_dbus()["join_pending"].value
+    await daemon.sign_in_start(APPLE_ID, APPLE_PASSWORD)
+    assert not daemon.status().join_pending  # still waiting for the verification code
+    await daemon.sign_in_code(CODE)
+    assert daemon.status().join_pending
+    assert daemon.status().to_dbus()["join_pending"].value is True
+    await daemon.recovery_devices()
+    await daemon.join(DEVICES[0].id, PASSCODE)
+    assert not daemon.status().join_pending  # joined
+    await daemon.sign_out()
+    assert not daemon.status().join_pending
+    assert account.calls[-1] == "sign_out"
+
+
+async def test_a_restarted_daemon_continues_at_the_device_step_without_signing_in_again(
+    account: FakeAccount, unstarted: Daemon
+) -> None:
+    # The state a daemon finds after its restart: the saved session passed the code, no join yet.
+    account.apple_id, account.signed_in, account.joined = APPLE_ID, True, False
+    await unstarted.start()
+    await settle()
+    assert unstarted.status().join_pending
+    assert await unstarted.recovery_devices() == list(DEVICES)
+    step = await unstarted.join(DEVICES[0].id, PASSCODE)
+    assert step.step == "done"
+    assert not {"sign_in", "submit_code", "request_sms"} & set(account.calls)
+    await settle()
+    assert (unstarted.status().state, unstarted.status().join_pending) == ("idle", False)
+
+
 async def test_recovery_devices_are_listed(daemon: Daemon) -> None:
     await to_device_step(daemon)
     assert await daemon.recovery_devices() == list(DEVICES)

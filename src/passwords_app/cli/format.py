@@ -98,6 +98,12 @@ def _next_step(state: str, status: Plain) -> tuple[str, ...]:
     if state == "signed-out":
         return ("", "Run `passwords-app signin` to connect your iCloud Keychain.")
     if state == "signin-required":
+        if status.get("join_pending"):
+            finish = (
+                "Run `passwords-app signin` to finish: it asks only for a device passcode, "
+                "not for your Apple Account password."
+            )
+            return ("", finish)
         return ("", "Run `passwords-app signin` to sign in again.")
     return ()
 

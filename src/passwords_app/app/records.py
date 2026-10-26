@@ -203,6 +203,8 @@ class Status:
     message: str = ""
     pending_local_deletions: tuple[str, ...] = ()
     pending_remote_deletions: tuple[str, ...] = ()
+    # Signed in with the password and the code done; only the device passcode is missing.
+    join_pending: bool = False
 
     @classmethod
     def from_wire(cls, d: Wire) -> Status:
@@ -223,6 +225,7 @@ class Status:
             message=_str(d, "message"),
             pending_local_deletions=_strs(d, "pending_local_deletions"),
             pending_remote_deletions=_strs(d, "pending_remote_deletions"),
+            join_pending=_bool(d, "join_pending"),
         )
 
     @property

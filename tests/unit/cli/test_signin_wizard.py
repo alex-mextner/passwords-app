@@ -31,6 +31,14 @@ DEVICES = [
 ]
 
 
+SIGNED_OUT = {"state": "signed-out", "apple_id": "", "join_pending": False}
+PASSED_THE_CODE = {
+    "state": "signin-required",
+    "apple_id": "alice@example.com",
+    "join_pending": True,
+}
+
+
 def step(name: str, destination: str = "", message: str = "") -> dict[str, Any]:
     return {"step": name, "destination": destination, "message": message or f"{name} message"}
 
@@ -41,6 +49,13 @@ class FakeClient:
     devices: list[dict[str, Any]] = field(default_factory=lambda: list(DEVICES))
     attempts: int = 10
     calls: list[tuple[str, tuple[Any, ...]]] = field(default_factory=list)
+    saved: dict[str, Any] = field(default_factory=lambda: dict(SIGNED_OUT))
+    # Raised by the first `recovery_devices` call only, like Apple refusing the saved token once.
+    first_devices_error: DaemonCallError | None = None
+
+    async def status(self) -> dict[str, Any]:
+        self.calls.append(("status", ()))
+        return dict(self.saved)
 
     async def sign_in_start(self, apple_id: str, password: str) -> dict[str, Any]:
         self.calls.append(("start", (apple_id, password)))
@@ -62,6 +77,9 @@ class FakeClient:
 
     async def recovery_devices(self) -> list[dict[str, Any]]:
         self.calls.append(("devices", ()))
+        if self.first_devices_error is not None:
+            error, self.first_devices_error = self.first_devices_error, None
+            raise error
         return self.devices
 
     async def join(self, device_id: str, passcode: str) -> dict[str, Any]:
@@ -247,3 +265,73 @@ async def test_other_daemon_errors_propagate_during_join() -> None:
 
     with pytest.raises(DaemonCallError):
         await wizard(Locked(), happy_terminal())
+
+
+# --- a sign-in that already passed the password and the verification code ----------------------
+
+
+async def test_a_sign_in_waiting_for_the_passcode_asks_for_the_passcode_only() -> None:
+    client = FakeClient(saved=PASSED_THE_CODE)
+    term = ScriptedTerminal(answers=["1", CONFIRM_WORD], secrets=[PASSCODE])
+    await wizard(client, term)
+    assert client.called("start") == []
+    assert client.called("code") == []
+    assert client.called("sms") == []
+    assert client.called("join") == [("D1", PASSCODE)]
+    assert "alice@example.com is already signed in on this computer" in term.output
+    assert not any("Apple Account" in p or "Verification code" in p for p in term.prompts)
+    assert term.secret_prompts == ["Passcode of Alice's iPhone: "]
+
+
+async def test_apple_refusing_the_saved_sign_in_starts_the_full_wizard() -> None:
+    refused = "ckAppInit rejected the mmeAuthToken (HTTP 401); sign in again"
+    client = FakeClient(
+        saved=PASSED_THE_CODE, first_devices_error=DaemonCallError(ERR + "AuthRequired", refused)
+    )
+    term = happy_terminal()
+    await wizard(client, term)
+    assert client.called("start") == [("alice@example.com", APPLE_PW)]
+    assert client.called("join") == [("D1", PASSCODE)]
+    assert f"The saved sign-in could not be continued ({refused})." in term.output
+
+
+async def test_another_apple_account_on_the_command_line_starts_from_the_beginning() -> None:
+    client = FakeClient(saved=PASSED_THE_CODE)
+    term = ScriptedTerminal(answers=[CODE, "1", CONFIRM_WORD], secrets=[APPLE_PW, PASSCODE])
+    await wizard(client, term, apple_id="bob@example.com")
+    assert client.called("start") == [("bob@example.com", APPLE_PW)]
+    assert "already signed in" not in term.output
+
+
+async def test_the_same_apple_account_on_the_command_line_still_resumes() -> None:
+    client = FakeClient(saved=PASSED_THE_CODE)
+    term = ScriptedTerminal(answers=["1", CONFIRM_WORD], secrets=[PASSCODE])
+    await wizard(client, term, apple_id=" Alice@Example.com ")
+    assert client.called("start") == []
+    assert client.called("join") == [("D1", PASSCODE)]
+
+
+async def test_a_wrong_passcode_while_resuming_can_be_retried() -> None:
+    client = FakeClient(saved=PASSED_THE_CODE)
+    term = ScriptedTerminal(
+        answers=["1", CONFIRM_WORD, "y", "2", CONFIRM_WORD], secrets=["0000", PASSCODE]
+    )
+    await wizard(client, term)
+    assert client.called("start") == []
+    assert client.called("join") == [("D1", "0000"), ("D2", PASSCODE)]
+
+
+@pytest.mark.parametrize(
+    "saved",
+    [
+        {"state": "signin-required", "apple_id": "alice@example.com", "join_pending": False},
+        {"state": "idle", "apple_id": "alice@example.com", "join_pending": False},
+        {"state": "signed-out", "apple_id": "", "join_pending": False},
+        {"state": "signed-out", "apple_id": ""},  # a daemon from before the field existed
+    ],
+)
+async def test_every_other_state_starts_the_full_wizard(saved: dict[str, Any]) -> None:
+    client = FakeClient(saved=saved)
+    await wizard(client, happy_terminal())
+    assert client.called("start") == [("alice@example.com", APPLE_PW)]
+    assert client.called("devices") == [()]  # only after the code, never to resume

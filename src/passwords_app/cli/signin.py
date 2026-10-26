@@ -67,15 +67,52 @@ class SignInBlockedError(Exception):
 async def run_wizard(client: DaemonClient, term: Terminal, *, apple_id: str | None = None) -> None:
     term.say("Sign in to iCloud Keychain")
     term.say()
+    step = await _resume(client, term, apple_id)
+    if step is None:
+        step = await _start(client, term, apple_id)
+    term.say()
+    term.say(str(step.get("message") or "Signed in."))
+    term.say("Your passwords are syncing now; `passwords-app status` shows progress.")
+
+
+async def _start(client: DaemonClient, term: Terminal, apple_id: str | None) -> Plain:
     account = (apple_id or term.ask("Apple Account (email or phone number): ")).strip()
     password = term.secret("Password: ")
     step = await client.sign_in_start(account, password)
     step = await _codes(client, term, step)
     if step["step"] == "device":
         step = await _join(client, term)
-    term.say()
-    term.say(str(step.get("message") or "Signed in."))
-    term.say("Your passwords are syncing now; `passwords-app status` shows progress.")
+    return step
+
+
+async def _resume(client: DaemonClient, term: Terminal, apple_id: str | None) -> Plain | None:
+    """Continue at the device passcode when the password and the code were already done.
+
+    The daemon keeps that sign-in across restarts, so asking for the Apple Account, the password
+    and a new verification code again would only throw it away. Returns None when there is
+    nothing to continue (or the saved sign-in cannot be continued): the caller starts over.
+    """
+    saved = await client.status()
+    if not saved.get("join_pending"):
+        return None
+    account = str(saved.get("apple_id") or "")
+    if apple_id and apple_id.strip().casefold() != account.casefold():
+        return None  # another Apple Account was asked for
+    term.say(
+        f"{account} is already signed in on this computer: the password and the verification "
+        "code are done. Only the device passcode is missing."
+    )
+    try:
+        devices = await client.recovery_devices()
+    except DaemonCallError as exc:
+        if exc.short != "AuthRequired":
+            raise
+        term.say()
+        term.say(f"The saved sign-in could not be continued ({exc}).")
+        term.say("Starting the sign-in from the beginning; press Ctrl-C to try again later.")
+        term.say()
+        return None
+    return await _join(client, term, devices)
 
 
 async def _codes(client: DaemonClient, term: Terminal, step: Plain) -> Plain:
@@ -122,12 +159,14 @@ async def _choose(term: Terminal, devices: list[Plain]) -> Plain:
         term.say(f"Please type a number from 1 to {len(devices)}.")
 
 
-async def _join(client: DaemonClient, term: Terminal) -> Plain:
+async def _join(client: DaemonClient, term: Terminal, devices: list[Plain] | None = None) -> Plain:
+    """Pick a device and send its passcode; `devices` is a list the caller already fetched."""
     term.say()
     term.say(EXPLANATION)
     term.say()
-    while True:
+    if devices is None:
         devices = await client.recovery_devices()
+    while True:
         if not devices:
             msg = (
                 "Apple lists no device whose passcode can admit this computer. Turn on "
@@ -151,3 +190,4 @@ async def _join(client: DaemonClient, term: Terminal) -> Plain:
             if again.casefold() not in {"y", "yes"}:
                 msg = "Stopped. Run `passwords-app signin` when you have the passcode."
                 raise SignInCancelledError(msg) from exc
+        devices = await client.recovery_devices()  # the retry works from a fresh list

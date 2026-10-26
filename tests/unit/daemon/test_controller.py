@@ -104,6 +104,7 @@ async def test_signed_in_but_not_joined_requires_sign_in(
         MSG_NOT_JOINED,
     )
     assert unstarted.status().apple_id == "alice@example.com"
+    assert unstarted.status().join_pending
     assert remote.calls == []
 
 
@@ -132,6 +133,7 @@ async def test_a_session_apple_rejects_at_start_asks_to_sign_in(
     await unstarted.start()
     await settle()
     assert (unstarted.status().state, unstarted.status().message) == ("signin-required", MSG_AUTH)
+    assert not unstarted.status().join_pending  # joined already: only a full sign-in helps
 
 
 async def test_account_calls_run_off_the_event_loop(account: FakeAccount, daemon: Daemon) -> None:

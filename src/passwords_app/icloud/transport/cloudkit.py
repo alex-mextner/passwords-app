@@ -22,7 +22,7 @@ from typing import TYPE_CHECKING
 
 import requests
 
-from passwords_app.icloud import tls
+from passwords_app.icloud import const, tls
 from passwords_app.icloud.errors import AppleError
 from passwords_app.icloud.proto import codec as _proto
 from passwords_app.icloud.proto.codec import (
@@ -48,9 +48,12 @@ CKDATABASE_SYNC_PATH = "/ckdatabase/api/client/record/sync"
 CKDATABASE_SAVE_PATH = "/ckdatabase/api/client/record/save"
 CKDATABASE_DELETE_PATH = "/ckdatabase/api/client/record/delete"
 CK_APP_INIT_URL = "https://gateway.icloud.com/setup/setup/ck/v1/ckAppInit"
+# CloudKit is told the same platform as every other sign-in endpoint (`const.WINDOWS_PLATFORM`).
+# Apple answers ckAppInit with HTTP 401 to a valid token minted as a Windows client when the
+# request claims a Mac (checked against Apple on 2026-10-26; the same token was accepted with
+# this claim), so a session that passed the code could never reach the device-passcode step.
 CK_MME_CLIENT_INFO = (
-    "<MacBookPro18,3> <Mac OS X;13.4.1;22F8> "
-    "<com.apple.cloudkit.CloudKitDaemon/1970 (com.apple.cloudd/1970)>"
+    f"{const.WINDOWS_PLATFORM} <com.apple.cloudkit.CloudKitDaemon/1970 (com.apple.cloudd/1970)>"
 )
 CUTTLEFISH_CONTAINER = "com.apple.security.keychain"
 CUTTLEFISH_BUNDLE = "com.apple.security.cuttlefish"  # CKCode (Cuttlefish) requests

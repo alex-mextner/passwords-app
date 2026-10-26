@@ -5,10 +5,11 @@
 from __future__ import annotations
 
 import base64
+import errno
 import json
 import os
 import stat
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Self
 
 import nacl.secret
 import pytest
@@ -20,6 +21,7 @@ from passwords_app.icloud.paths import ConfigPaths, default_config_dir
 if TYPE_CHECKING:
     from collections.abc import Iterable, Iterator
     from pathlib import Path
+    from typing import BinaryIO
 
 
 @pytest.fixture(autouse=True)
@@ -204,6 +206,50 @@ def test_written_files_are_never_world_readable(tmp_path: Path) -> None:
     sess.write_private(path, b"new")
     assert path.read_bytes() == b"new"
     assert stat.S_IMODE(path.stat().st_mode) == 0o600
+
+
+class _FailsHalfway:
+    """A file object whose write lands half the bytes and then fails, like a full disk."""
+
+    def __init__(self, inner: BinaryIO) -> None:
+        self.inner = inner
+
+    def __enter__(self) -> Self:
+        return self
+
+    def __exit__(self, *_exc: object) -> None:
+        self.inner.close()
+
+    def write(self, data: bytes) -> int:
+        self.inner.write(data[: len(data) // 2])
+        self.inner.flush()
+        raise OSError(errno.ENOSPC, "No space left on device")
+
+    def __getattr__(self, name: str) -> object:
+        return getattr(self.inner, name)
+
+
+def test_a_save_that_fails_halfway_leaves_the_earlier_session_readable(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    store = _store(tmp_path)
+    store.save({"username": "alice@example.com", "mme": {"mmeAuthToken": "first"}})
+    before = sorted(p.name for p in store.paths.root.iterdir())
+    real_fdopen = os.fdopen
+    with monkeypatch.context() as patch:
+        patch.setattr(os, "fdopen", lambda fd, _mode: _FailsHalfway(real_fdopen(fd, "wb")))
+        with pytest.raises(OSError, match="No space"):
+            store.save({"username": "alice@example.com", "mme": {"mmeAuthToken": "second"}})
+    assert store.load() == {"username": "alice@example.com", "mme": {"mmeAuthToken": "first"}}
+    assert sorted(p.name for p in store.paths.root.iterdir()) == before  # no temporary file stays
+
+
+def test_a_new_process_reads_the_session_the_old_one_saved(tmp_path: Path) -> None:
+    coll = FakeCollection()
+    _store(tmp_path, coll).save({"username": "alice@example.com"})
+    sess.forget_cached_keys()  # a restarted daemon, or one from a reinstalled venv
+    assert _store(tmp_path, coll).load() == {"username": "alice@example.com"}
+    assert len(coll.items) == 1  # the key was found again, not replaced
 
 
 # --- files from earlier versions ---------------------------------------------------------------

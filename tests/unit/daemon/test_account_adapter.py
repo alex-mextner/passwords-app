@@ -48,6 +48,10 @@ class SignInRequired(AccountError):  # noqa: N818
     pass
 
 
+class ServiceUnavailable(AccountError):  # noqa: N818
+    pass
+
+
 class SignInStep(enum.StrEnum):
     CODE = "code"
     DEVICE = "device"
@@ -127,7 +131,14 @@ class Account:
 @pytest.fixture
 def module(monkeypatch: pytest.MonkeyPatch) -> types.ModuleType:
     m = types.ModuleType("passwords_app.icloud.account")
-    for cls in (AccountError, WrongCode, WrongPasscode, SignInRequired, Account):
+    for cls in (
+        AccountError,
+        WrongCode,
+        WrongPasscode,
+        SignInRequired,
+        ServiceUnavailable,
+        Account,
+    ):
         setattr(m, cls.__name__, cls)
     monkeypatch.setitem(sys.modules, "passwords_app.icloud.account", m)
     Account.instances = []
@@ -197,6 +208,7 @@ def test_remote_store_is_returned(adapter: ICloudAccount) -> None:
         (WrongPasscode("Wrong passcode, 9 attempts left."), WrongPasscodeError),
         (SignInRequired("sign in again"), AuthRequiredError),
         (AccountError("Your Apple Account or password was incorrect."), AuthRequiredError),
+        (ServiceUnavailable("ckAppInit returned HTTP 503"), UnavailableError),
         (ConnectionError("connection refused"), UnavailableError),
         (TimeoutError("timed out"), UnavailableError),
         (OSError("network unreachable"), UnavailableError),

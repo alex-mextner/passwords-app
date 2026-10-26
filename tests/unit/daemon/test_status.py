@@ -45,6 +45,7 @@ def test_status_dict_has_every_key_with_the_documented_type() -> None:
         "message": "s",
         "pending_local_deletions": "as",
         "pending_remote_deletions": "as",
+        "join_pending": "b",
     }
 
 
@@ -65,6 +66,7 @@ def test_values_are_carried() -> None:
         message="m",
         pending_local=("A",),
         pending_remote=("B", "C"),
+        join_pending=True,
     ).to_dbus()
     assert {k: v.value for k, v in d.items()} == {
         "state": "paused",
@@ -76,6 +78,7 @@ def test_values_are_carried() -> None:
         "message": "m",
         "pending_local_deletions": ["A"],
         "pending_remote_deletions": ["B", "C"],
+        "join_pending": True,
     }
 
 

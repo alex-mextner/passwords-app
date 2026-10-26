@@ -238,6 +238,11 @@ class FakeDaemon(ServiceInterface):
     def apple_id(self) -> str:
         return self._apple_id
 
+    @property
+    def join_pending(self) -> bool:
+        """Signed in with the password and the code done; only the device passcode is missing."""
+        return self._state == "signin-required" and self._signin_stage == "device"
+
     def fail_next(self, method: str, error_name: str, message: str = "") -> None:
         """Make the next call of D-Bus `method` raise `error_name` (short or full name)."""
         self._failures[method] = _error(error_name, message or f"injected {error_name}")
@@ -266,6 +271,12 @@ class FakeDaemon(ServiceInterface):
     def require_signin(self, message: str = "Sign in to iCloud again to keep syncing") -> None:
         self._signin_stage = "none"
         self.set_state("signin-required", message)
+
+    def require_join(self, apple_id: str = "alex.doe@example.com") -> None:
+        """Signed in with the password and the code done; only the device passcode is missing."""
+        self._signin_apple_id = self._apple_id = apple_id
+        self._signin_stage = "device"
+        self.set_state("signin-required", "Confirm with a device passcode to finish signing in")
 
     def sign_out(self) -> None:
         self._auth_epoch += 1
@@ -371,6 +382,7 @@ class FakeDaemon(ServiceInterface):
             "message": self._message,
             "pending_local_deletions": list(self._pending_local),
             "pending_remote_deletions": list(self._pending_remote),
+            "join_pending": self.join_pending,
         }
 
     def _status(self) -> VariantDict:
@@ -385,6 +397,7 @@ class FakeDaemon(ServiceInterface):
             "message": Variant("s", v["message"]),
             "pending_local_deletions": Variant("as", v["pending_local_deletions"]),
             "pending_remote_deletions": Variant("as", v["pending_remote_deletions"]),
+            "join_pending": Variant("b", v["join_pending"]),
         }
 
     def _publish_status(self) -> None:

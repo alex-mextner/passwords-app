@@ -676,7 +676,10 @@ class MainWindow(Adw.ApplicationWindow):
             self.sign_in_dialog.present(self)
             return
         dialog = SignInDialog(
-            self.vault.client, apple_id=self.vault.status.apple_id, on_done=self._signed_in
+            self.vault.client,
+            apple_id=self.vault.status.apple_id,
+            join_pending=self.vault.status.join_pending,
+            on_done=self._signed_in,
         )
         dialog.connect("closed", lambda *_a: setattr(self, "sign_in_dialog", None))
         self.sign_in_dialog = dialog

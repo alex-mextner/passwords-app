@@ -281,9 +281,11 @@ def test_status_from_wire_full() -> None:
             "message": "",
             "pending_local_deletions": ["a", "b"],
             "pending_remote_deletions": ["c"],
+            "join_pending": True,
         }
     )
     assert status.state is SyncState.PAUSED
+    assert status.join_pending
     assert status.apple_id == "jane@example.com"
     assert status.item_count == 42
     assert status.trash_count == 3
@@ -307,6 +309,7 @@ def test_status_absent_keys_default() -> None:
     assert status.last_sync is None
     assert status.pending_deletions == 0
     assert status.message == ""
+    assert not status.join_pending  # a daemon from before the field existed
 
 
 @pytest.mark.parametrize(
@@ -317,6 +320,7 @@ def test_status_absent_keys_default() -> None:
         {"state": "idle", "trash_count": False},
         {"state": "idle", "pending_local_deletions": "a"},
         {"state": "idle", "message": None},
+        {"state": "idle", "join_pending": "yes"},
     ],
 )
 def test_status_rejects_malformed(bad: dict[str, object]) -> None:

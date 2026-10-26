@@ -32,7 +32,7 @@ from cryptography.hazmat.primitives import serialization
 from cryptography.hazmat.primitives.asymmetric import ec
 from cryptography.hazmat.primitives.ciphers.aead import AESGCM
 
-from passwords_app.icloud import passwords
+from passwords_app.icloud import const, passwords
 from passwords_app.icloud.keychain import crypto as kc
 from passwords_app.icloud.keychain import pipeline
 from passwords_app.icloud.proto.codec import Writer, decode_fields, first_bytes, first_int
@@ -320,15 +320,22 @@ class FakeCloudKit:
 
     # --- request handling ------------------------------------------------------------------------
 
+    def _app_init(self, headers: dict[str, str]) -> tuple[int, bytes, str]:
+        # Like Apple: a client that claims another platform than the token's gets 401
+        # (see `cloudkit.CK_MME_CLIENT_INFO`).
+        if not headers.get("x-mme-client-info", "").startswith(const.WINDOWS_PLATFORM):
+            return HTTPStatus.UNAUTHORIZED, b"", "text/plain"
+        return (
+            HTTPStatus.OK,
+            json.dumps({"cloudKitUserId": self.user_id}).encode(),
+            "application/json",
+        )
+
     def handle(self, path: str, headers: dict[str, str], body: bytes) -> tuple[int, bytes, str]:
         if self.on_request is not None:
             self.on_request(path)
         if path.startswith("/setup/setup/ck/v1/ckAppInit"):
-            return (
-                HTTPStatus.OK,
-                json.dumps({"cloudKitUserId": self.user_id}).encode(),
-                "application/json",
-            )
+            return self._app_init(headers)
         if headers.get("x-cloudkit-authtoken") != self.token:
             return HTTPStatus.UNAUTHORIZED, b"", "text/plain"
         fault = self._fault(path)

@@ -189,7 +189,12 @@ class SignInDialog(Adw.Dialog):
     __gtype_name__ = "PasswordsSignInDialog"
 
     def __init__(
-        self, client: DaemonClient, *, apple_id: str = "", on_done: Callable[[], None]
+        self,
+        client: DaemonClient,
+        *,
+        apple_id: str = "",
+        join_pending: bool = False,
+        on_done: Callable[[], None],
     ) -> None:
         super().__init__(title=_("Sign In"), content_width=480, content_height=620)
         self.client = client
@@ -204,6 +209,8 @@ class SignInDialog(Adw.Dialog):
         # Re-authenticating (the usual case) only needs the password.
         self.set_focus(self.password if apple_id else self.apple_id)
         self.busy = False
+        if join_pending:
+            self._resume_at_devices()
 
     # ---------------------------------------------------------------- page 1
     def _account_page(self, apple_id: str) -> Adw.NavigationPage:
@@ -338,6 +345,25 @@ class SignInDialog(Adw.Dialog):
         def done(result: list[RecoveryDevice] | DaemonError) -> None:
             if isinstance(result, DaemonError):
                 self._show_failure(result.message)
+                return
+            self.devices = result
+            self._show_device_page()
+
+        self.client.recovery_devices(done)
+
+    def _resume_at_devices(self) -> None:
+        """Continue at the device page: the password and the code are already done."""
+        self._set_busy(True, self.continue_button, self.account_spinner)  # noqa: FBT003
+
+        def done(result: list[RecoveryDevice] | DaemonError) -> None:
+            self._set_busy(False, self.continue_button, self.account_spinner)  # noqa: FBT003
+            if isinstance(result, DaemonError):
+                if result.kind is ErrorKind.AUTH_REQUIRED:
+                    # The saved sign-in cannot be continued: only the password starts over.
+                    self.account_error.set_text(result.message or _("Could not sign in."))
+                    self.account_error.set_visible(True)
+                else:
+                    self._show_failure(result.message)
                 return
             self.devices = result
             self._show_device_page()
