@@ -661,7 +661,7 @@ def test_each_sign_in_step_is_logged_without_any_secret(
         "sign-in: Apple accepted the sign-in; a verification code was sent to your trusted devices",
         "sign-in: verification code refused",
         "sign-in: verification code accepted; signed in, the device passcode is still needed",
-        "sign-in: 2 recovery devices listed",
+        "sign-in: 2 recovery device(s) listed",
         "sign-in: the screen lock code of the chosen device was refused",
         "sign-in: joined iCloud Keychain",
     ]

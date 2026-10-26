@@ -140,6 +140,13 @@ def _log_failure(
     return kind(str(error))
 
 
+def _device_listing_error(error: Exception) -> type[AccountError]:
+    """Say whether the saved sign-in is dead (a refused token) or worth another try (an outage)."""
+    if isinstance(error, CloudKitError):
+        return AccountError if error.unauthorized else ServiceUnavailable
+    return ServiceUnavailable if isinstance(error, AnisetteError) else AccountError
+
+
 def _code_destination(factor: grandslam.SecondFactor) -> str:
     return "your phone by text message" if factor.kind == "sms" else "your trusted devices"
 
@@ -473,21 +480,10 @@ class Account:
             except AccountError as e:
                 logger.warning("sign-in: %s failed: %s", _DEVICES_STEP, _redacted(e))
                 raise
-            except CloudKitError as e:
-                # Only a refused token means the saved sign-in is dead; a timeout or an Apple
-                # outage is worth another try with the same session.
-                kind = AccountError if e.unauthorized else ServiceUnavailable
-                raise _log_failure(_DEVICES_STEP, e, kind) from e
-            except AnisetteError as e:
-                raise _log_failure(_DEVICES_STEP, e, ServiceUnavailable) from e
-            except (octagon.OctagonError, EscrowError) as e:
-                raise _log_failure(_DEVICES_STEP, e) from e
+            except (CloudKitError, AnisetteError, octagon.OctagonError, EscrowError) as e:
+                raise _log_failure(_DEVICES_STEP, e, _device_listing_error(e)) from e
             self._bottles = {text(b, "id") or "": b for b in bottles}
-            logger.info(
-                "sign-in: %d recovery %s listed",
-                len(bottles),
-                "device" if len(bottles) == 1 else "devices",
-            )
+            logger.info("sign-in: %d recovery device(s) listed", len(bottles))
             return [_describe(b) for b in bottles]
 
     def join(self, device_id: str, passcode: str) -> SignInStep:
