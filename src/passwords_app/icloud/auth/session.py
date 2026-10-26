@@ -16,7 +16,9 @@ import binascii
 import json
 import logging
 import os
+import tempfile
 import threading
+from pathlib import Path
 from typing import TYPE_CHECKING, Protocol, cast
 
 import nacl.exceptions
@@ -27,7 +29,6 @@ from passwords_app.icloud.errors import AppleError
 
 if TYPE_CHECKING:
     from collections.abc import Callable, Iterable
-    from pathlib import Path
 
     from passwords_app.icloud.paths import ConfigPaths
     from passwords_app.icloud.values import Record
@@ -106,11 +107,24 @@ def key_from_collection(coll: _Collection) -> bytes | None:
 
 
 def write_private(path: Path, data: bytes) -> None:
-    """Write a file that is 0600 from creation: secrets must never exist world-readable."""
-    fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
-    with os.fdopen(fd, "wb") as fh:
-        fh.write(data)
-    path.chmod(0o600)
+    """Replace a file with `data`, 0600 from creation and never half-written.
+
+    The data goes to a private temporary file next to `path` and is renamed over it only once it
+    is on disk, so `path` always holds a whole file, the earlier one or the new one: a crash, a
+    forced stop or a full disk while writing cannot truncate it. (A process stopped in the middle
+    can leave its temporary file behind; the session itself is never affected.) The session is the
+    one thing the owner cannot get back without signing in again.
+    """
+    fd, name = tempfile.mkstemp(dir=path.parent, prefix=f".{path.name}.")
+    try:
+        with os.fdopen(fd, "wb") as fh:
+            fh.write(data)
+            fh.flush()
+            os.fsync(fh.fileno())
+        Path(name).replace(path)
+    except BaseException:
+        Path(name).unlink(missing_ok=True)
+        raise
 
 
 def key_from_file(path: Path) -> bytes:

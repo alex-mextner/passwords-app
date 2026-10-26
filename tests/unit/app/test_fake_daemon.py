@@ -78,6 +78,7 @@ STATUS_KEYS = {
     "message": "s",
     "pending_local_deletions": "as",
     "pending_remote_deletions": "as",
+    "join_pending": "b",
 }
 # RFC 6238 appendix B: SHA-1 with the ASCII key "12345678901234567890", 8 digits.
 _RFC_KEY = base64.b32encode(b"12345678901234567890").decode()

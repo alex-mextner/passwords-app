@@ -293,6 +293,8 @@ class Daemon:
         self._state: SyncState = "signed-out"
         self._message = MSG_SIGNED_OUT
         self._apple_id = ""
+        # Signed in, password and code done, only the device passcode is missing.
+        self._join_pending = False
         self._published: dict[str, tuple[object, ...]] | None = None
         self._announced: LocalSnapshot | None = None
         self._awaiting_code: str | None = None
@@ -368,10 +370,11 @@ class Daemon:
             message=self._message,
             pending_local=pending.local_ids if pending and signed_in else (),
             pending_remote=pending.remote_ids if pending and signed_in else (),
+            join_pending=self._join_pending,
         )
 
-    def _set(self, state: SyncState, message: str) -> None:
-        self._state, self._message = state, message
+    def _set(self, state: SyncState, message: str, *, join_pending: bool = False) -> None:
+        self._state, self._message, self._join_pending = state, message, join_pending
         self._publish()
 
     def _publish(self) -> None:
@@ -401,7 +404,7 @@ class Daemon:
         if not (info.signed_in and info.joined):
             self._remote.use(None)
             if info.signed_in:
-                self._set("signin-required", MSG_NOT_JOINED)
+                self._set("signin-required", MSG_NOT_JOINED, join_pending=True)
             else:
                 self._set(
                     "signed-out",

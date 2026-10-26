@@ -143,6 +143,16 @@ def test_signin_required_points_to_signin() -> None:
     assert "Sign-in required" in text
     assert "Apple needs you" in text
     assert "passwords-app signin" in text
+    assert "sign in again" in text
+
+
+def test_a_sign_in_waiting_for_the_passcode_says_it_needs_only_that() -> None:
+    text = fmt.status_text(
+        status(state="signin-required", message="Finish signing in", join_pending=True), NOW
+    )
+    assert "passwords-app signin" in text
+    assert "asks only for a device passcode" in text
+    assert "sign in again" not in text
 
 
 def test_paused_lists_held_back_deletions_and_both_choices() -> None:

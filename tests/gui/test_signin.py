@@ -4,11 +4,16 @@
 
 from __future__ import annotations
 
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 import pytest
 from tests.fakes.fake_daemon import FakeDaemon
 from tests.gui import support
+
+from passwords_app.app.records import SyncState
+
+if TYPE_CHECKING:
+    from collections.abc import Callable
 
 pytestmark = pytest.mark.timeout(120)
 
@@ -22,6 +27,12 @@ def _wizard(app: support.AppUnderTest) -> Any:
     support.wait_until(app.window.list_page.signin_banner.get_revealed, what="banner")
     app.window.activate_action("win.sign-in", None)
     return support.wait_until(lambda: app.window.sign_in_dialog, what="wizard")
+
+
+def _wizard_after(app: support.AppUnderTest, status_ready: Callable[[], bool]) -> Any:
+    # The banner already shows while signed out: wait for the app to learn the new status first.
+    support.wait_until(status_ready, what="status")
+    return _wizard(app)
 
 
 def _account(dialog: Any, password: str = "correct-horse") -> None:
@@ -180,3 +191,43 @@ def test_no_2fa_goes_straight_to_devices(app: support.AppUnderTest) -> None:
     dialog = _wizard(app)
     _account(dialog)
     support.wait_until(lambda: dialog.page_tag == "device", what="device page")
+
+
+def test_a_sign_in_waiting_for_the_passcode_resumes_at_the_device_page(
+    app: support.AppUnderTest,
+) -> None:
+    app.call(lambda d: d.require_join())
+    dialog = _wizard_after(app, lambda: app.window.vault.status.join_pending)
+    support.wait_until(lambda: dialog.page_tag == "device", what="device page")
+    calls = app.call(lambda d: list(d.calls))
+    assert "ListRecoveryDevices" in calls
+    assert "SignInStart" not in calls
+    assert "SignInCode" not in calls
+    assert dialog.password.get_text() == ""
+
+
+def test_a_saved_sign_in_apple_refuses_falls_back_to_the_account_page(
+    app: support.AppUnderTest,
+) -> None:
+    refused = "ckAppInit rejected the mmeAuthToken (HTTP 401); sign in again"
+    app.call(lambda d: d.require_join())
+    app.call(lambda d: d.fail_next("ListRecoveryDevices", "AuthRequired", refused))
+    dialog = _wizard_after(app, lambda: app.window.vault.status.join_pending)
+    support.wait_until(dialog.account_error.get_visible, what="error")
+    assert refused in dialog.account_error.get_text()
+    assert dialog.page_tag == "account"
+    assert dialog.apple_id.get_text() == "alex.doe@example.com"
+    assert dialog.continue_button.get_sensitive()
+    dialog.password.set_text("correct-horse")
+    dialog.continue_button.emit("clicked")
+    support.wait_until(lambda: dialog.page_tag == "code", what="the full sign-in goes on")
+
+
+def test_a_sign_in_that_needs_the_password_again_starts_on_the_account_page(
+    app: support.AppUnderTest,
+) -> None:
+    app.call(lambda d: d.require_signin())
+    dialog = _wizard_after(app, lambda: app.window.vault.status.state is SyncState.SIGNIN_REQUIRED)
+    support.pump(0.3)
+    assert dialog.page_tag == "account"
+    assert "ListRecoveryDevices" not in app.call(lambda d: list(d.calls))

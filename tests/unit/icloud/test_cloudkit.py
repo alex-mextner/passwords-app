@@ -13,6 +13,7 @@ from typing import TYPE_CHECKING, Any, override
 import pytest
 import requests
 
+from passwords_app.icloud import const
 from passwords_app.icloud.proto import codec as pb
 from passwords_app.icloud.proto import cuttlefish as cf
 from passwords_app.icloud.transport import ckks
@@ -203,6 +204,15 @@ def test_ck_app_init_auth_and_shape() -> None:
     assert sent["data"] == ""
     assert sent["headers"]["Authorization"] == "Basic " + base64.b64encode(b"163:MME").decode()
     assert sent["headers"]["X-Apple-I-MD"] == "md"
+
+
+def test_ck_app_init_claims_the_anisette_platform() -> None:
+    http = _Http(lambda _: _response(b'{"cloudKitUserId": "_ckuser123"}'))
+    ck.ck_app_init(
+        ck.CUTTLEFISH_CONTAINER, ck.CUTTLEFISH_BUNDLE, "163", "MME", _Anisette(), http=http
+    )
+    [sent] = http.sent
+    assert sent["headers"]["x-mme-client-info"].startswith(const.WINDOWS_PLATFORM)
 
 
 # --- responses -------------------------------------------------------------------------------

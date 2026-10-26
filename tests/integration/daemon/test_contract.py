@@ -394,6 +394,7 @@ async def test_status_changed_is_emitted_during_sync(client: Client) -> None:
         "message": "s",
         "pending_local_deletions": "as",
         "pending_remote_deletions": "as",
+        "join_pending": "b",
     }
 
 

@@ -20,6 +20,7 @@ from __future__ import annotations
 import dataclasses
 import enum
 import logging
+import re
 import threading
 import time
 from http import HTTPStatus
@@ -69,6 +70,10 @@ class SignInRequired(AccountError):  # noqa: N818 - public API name fixed by the
     """Apple wants an interactive sign-in (password or verification code) before syncing."""
 
 
+class ServiceUnavailable(AccountError):  # noqa: N818 - named like its siblings
+    """Apple's service did not answer usefully (timeout, HTTP 5xx); the saved sign-in is fine."""
+
+
 class SignInStep(enum.StrEnum):
     CODE = "code"
     DEVICE = "device"
@@ -109,6 +114,48 @@ class Endpoints:
     gsa: str = const.GSA_BASE_URL
     login_delegates: str = icloud_auth.LOGIN_DELEGATES_URL
     account_settings: str = icloud_auth.ACCOUNT_SETTINGS_URL
+
+
+_SRP_STEP = "the password step"
+_CODE_STEP = "the verification code step"
+_SMS_STEP = "sending the code by text message"
+_TOKENS_STEP = "minting the iCloud tokens"
+_DEVICES_STEP = "listing the recovery devices"
+_JOIN_STEP = "joining iCloud Keychain"
+
+
+# A URL in an error text may carry credentials (an anisette server URL with a login or a key).
+_URL_CREDENTIALS = re.compile(r"(?<=://)[^/\s@]+@|\?[^\s)\"']*")
+
+
+def _redacted(text_: object) -> str:
+    return _URL_CREDENTIALS.sub(lambda m: "***@" if m.group().endswith("@") else "?***", str(text_))
+
+
+def _log_failure(
+    what: str, error: Exception, kind: type[AccountError] = AccountError
+) -> AccountError:
+    """Log why a sign-in step ended, without credentials, and wrap it for the user."""
+    logger.warning("sign-in: %s failed: %s", what, _redacted(error))
+    return kind(str(error))
+
+
+def _device_listing_error(error: Exception) -> type[AccountError]:
+    """Say whether the saved sign-in is dead (a refused token) or worth another try (an outage)."""
+    if isinstance(error, CloudKitError):
+        return AccountError if error.unauthorized else ServiceUnavailable
+    return ServiceUnavailable if isinstance(error, AnisetteError) else AccountError
+
+
+def _code_destination(factor: grandslam.SecondFactor) -> str:
+    return "your phone by text message" if factor.kind == "sms" else "your trusted devices"
+
+
+def _next_step_text(step: SignInStep) -> str:
+    """Say what the next sign-in step is, from what the password or code step saved."""
+    if step is SignInStep.DONE:
+        return "signed in, this computer is already part of iCloud Keychain"
+    return "signed in, the device passcode is still needed"
 
 
 class Account:
@@ -197,20 +244,29 @@ class Account:
                 if factor is not None:
                     grandslam.trigger(gsa, factor)
                     self._pending = _Pending(gsa, apple_id, password, factor)
+                    logger.info(
+                        "sign-in: Apple accepted the sign-in; a verification code was sent to %s",
+                        _code_destination(factor),
+                    )
                     return SignInStep.CODE
             except (GSAError, AnisetteError) as e:
-                raise AccountError(str(e)) from e
+                raise _log_failure(_SRP_STEP, e) from e
             try:
-                return self._complete(spd, apple_id, password)
+                step = self._complete(spd, apple_id, password)
             except icloud_auth.LoginRejected as e:
                 # SRP passed (a wrong password stops at GSA), so "entered incorrectly" here means
                 # an untrusted device whose code Apple pushed by itself: ask for that code.
                 implied = grandslam.implied_factor(spd)
                 if not e.needs_code or implied is None:
-                    raise AccountError(str(e)) from e
+                    raise _log_failure(_TOKENS_STEP, e) from e
                 logger.info("sign-in: loginDelegates wants the pushed code; asking for it")
                 self._pending = _Pending(gsa, apple_id, password, implied)
                 return SignInStep.CODE
+            logger.info(
+                "sign-in: Apple accepted the sign-in without a verification code; %s",
+                _next_step_text(step),
+            )
+            return step
 
     def submit_code(self, code: str) -> SignInStep:
         with self._lock:
@@ -223,14 +279,17 @@ class Account:
                     pending.gsa, pending.apple_id, pending.password, pending.factor, code.strip()
                 )
             except CodeRejectedError as e:
+                logger.info("sign-in: verification code refused")
                 raise WrongCode(str(e)) from e
             except (GSAError, AnisetteError) as e:
-                raise AccountError(str(e)) from e
+                raise _log_failure(_CODE_STEP, e) from e
             self._pending = None
             try:
-                return self._complete(spd, pending.apple_id, pending.password)
+                step = self._complete(spd, pending.apple_id, pending.password)
             except icloud_auth.LoginRejected as e:
-                raise AccountError(str(e)) from e
+                raise _log_failure(_TOKENS_STEP, e) from e
+            logger.info("sign-in: verification code accepted; %s", _next_step_text(step))
+            return step
 
     def request_sms(self) -> SignInStep:
         """Send the verification code by text message instead of to trusted devices."""
@@ -243,8 +302,9 @@ class Account:
             try:
                 grandslam.trigger(pending.gsa, factor)
             except (GSAError, AnisetteError) as e:
-                raise AccountError(str(e)) from e
+                raise _log_failure(_SMS_STEP, e) from e
             self._pending = dataclasses.replace(pending, factor=factor)
+            logger.info("sign-in: a verification code was sent by text message")
             return SignInStep.CODE
 
     def _complete(self, spd: Record, apple_id: str, password: str) -> SignInStep:
@@ -264,7 +324,7 @@ class Account:
         except icloud_auth.LoginRejected:
             raise
         except (GSAError, AnisetteError, icloud_auth.ICloudError) as e:
-            raise AccountError(str(e)) from e
+            raise _log_failure(_TOKENS_STEP, e) from e
         self._sessions.save(record)
         self._generation += 1
         return SignInStep.DONE if octagon.is_joined(record) else SignInStep.DEVICE
@@ -387,7 +447,10 @@ class Account:
             raise SignInRequired(msg)
         try:
             spd, factor = grandslam.start(self._gsa(), apple_id, password)
-        except (GSAError, AnisetteError) as e:
+        except AnisetteError as e:
+            # The anisette server is ours, not Apple's verdict: the saved sign-in is still good.
+            raise ServiceUnavailable(str(e)) from e
+        except GSAError as e:
             raise AccountError(str(e)) from e
         if factor is not None:
             msg = "Apple asks for a verification code; sign in again"
@@ -414,9 +477,13 @@ class Account:
                 bottles = client.list_recoverable_bottles(
                     escrow_host, text(record, "username") or "", self._pet(record)
                 )
-            except (CloudKitError, octagon.OctagonError, EscrowError, AnisetteError) as e:
-                raise AccountError(str(e)) from e
+            except AccountError as e:
+                logger.warning("sign-in: %s failed: %s", _DEVICES_STEP, _redacted(e))
+                raise
+            except (CloudKitError, AnisetteError, octagon.OctagonError, EscrowError) as e:
+                raise _log_failure(_DEVICES_STEP, e, _device_listing_error(e)) from e
             self._bottles = {text(b, "id") or "": b for b in bottles}
+            logger.info("sign-in: %d recovery device(s) listed", len(bottles))
             return [_describe(b) for b in bottles]
 
     def join(self, device_id: str, passcode: str) -> SignInStep:
@@ -442,12 +509,17 @@ class Account:
                     confirm_irreversible=True,
                 )
             except WrongEscrowPasscodeError as e:
+                logger.info("sign-in: the screen lock code of the chosen device was refused")
                 raise WrongPasscode(str(e)) from e
+            except AccountError as e:
+                logger.warning("sign-in: %s failed: %s", _JOIN_STEP, _redacted(e))
+                raise
             except (CloudKitError, octagon.OctagonError, EscrowError, AnisetteError) as e:
-                raise AccountError(str(e)) from e
+                raise _log_failure(_JOIN_STEP, e) from e
             self._sessions.save(record)
             self._generation += 1
             self._bottles = {}
+            logger.info("sign-in: joined iCloud Keychain")
             return SignInStep.DONE
 
     def sign_out(self) -> None:

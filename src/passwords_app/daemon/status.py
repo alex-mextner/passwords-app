@@ -47,6 +47,9 @@ class Status:
     message: str = ""
     pending_local: tuple[str, ...] = field(default=())
     pending_remote: tuple[str, ...] = field(default=())
+    # The Apple Account is signed in (password and code done); only the device passcode is
+    # missing, so a client continues at that step instead of asking for the password again.
+    join_pending: bool = False
 
     def to_dbus(self) -> dict[str, Variant]:
         return {
@@ -59,6 +62,7 @@ class Status:
             "message": Variant("s", self.message),
             "pending_local_deletions": Variant("as", list(self.pending_local)),
             "pending_remote_deletions": Variant("as", list(self.pending_remote)),
+            "join_pending": Variant("b", self.join_pending),
         }
 
 

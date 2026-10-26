@@ -89,6 +89,8 @@ class ICloudAccount:
             raise WrongCodeError(str(exc)) from exc
         except m.WrongPasscode as exc:
             raise WrongPasscodeError(str(exc)) from exc
+        except m.ServiceUnavailable as exc:
+            raise UnavailableError(str(exc)) from exc
         except m.AccountError as exc:
             # SignInRequired included: Apple wants the user again (password, code, ...).
             raise AuthRequiredError(str(exc)) from exc

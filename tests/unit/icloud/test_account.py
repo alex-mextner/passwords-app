@@ -10,6 +10,7 @@ loginDelegates and get_account_settings are a local plist server, CloudKit is `F
 
 from __future__ import annotations
 
+import logging
 import plistlib
 import threading
 from datetime import UTC, datetime
@@ -24,9 +25,12 @@ from passwords_app.icloud import account as acct
 from passwords_app.icloud.auth import grandslam
 from passwords_app.icloud.auth import icloud as icloud_auth
 from passwords_app.icloud.auth import session as sess
+from passwords_app.icloud.auth.anisette import AnisetteError
 from passwords_app.icloud.auth.gsa import CodeRejectedError, GSAError
 from passwords_app.icloud.escrow.srp import EscrowError, WrongEscrowPasscodeError
 from passwords_app.icloud.octagon import client as octagon
+from passwords_app.icloud.transport import cloudkit
+from passwords_app.icloud.transport.cloudkit import CloudKitError
 from passwords_app.icloud.values import Record, child
 from passwords_app.sync.ports import AuthRequired
 
@@ -534,6 +538,157 @@ def test_recovery_devices_are_described(signed_in: acct.Account) -> None:
     assert "octagon" in _record(signed_in)  # the peer identity exists before any attempt
 
 
+# --- a sign-in that passed the password and the code is finished with the passcode alone -------
+
+
+@pytest.fixture
+def apple_cloudkit(
+    setup_server: Setup, fake: FakeCloudKit, monkeypatch: pytest.MonkeyPatch
+) -> FakeCloudKit:
+    """Apple's CloudKit gateway behind the sign-in; nothing seeds the session's cloudKitUserId."""
+    setup_server.gateway = fake.url
+    setup_server.ck_token = fake.token
+    monkeypatch.setattr(
+        octagon.OctagonClient, "list_recoverable_bottles", lambda *_a, **_k: BOTTLES
+    )
+    return fake
+
+
+def _restarted(account: acct.Account, setup_server: Setup) -> acct.Account:
+    """A new daemon process over the same files and key store (its key cache is empty)."""
+    sess.forget_cached_keys()
+    endpoints = acct.Endpoints(
+        gsa="https://gsa.invalid",
+        login_delegates=f"{setup_server.url}/login",
+        account_settings=f"{setup_server.url}/settings",
+    )
+    return acct.Account(account.paths.root, anisette=NoAnisette(), endpoints=endpoints)
+
+
+def _joining(monkeypatch: pytest.MonkeyPatch, *, wrong: bytes = b"") -> None:
+    def join(  # noqa: PLR0913, PLR0917 - mirrors OctagonClient.join_via_escrow
+        self: octagon.OctagonClient,
+        host: str,
+        email: str,
+        pet: str,
+        passcode: bytes,
+        chosen: Record,
+        *,
+        confirm_irreversible: bool,
+    ) -> str:
+        del host, email, pet, chosen, confirm_irreversible
+        if passcode == wrong:
+            msg = "the passcode was not accepted"
+            raise WrongEscrowPasscodeError(msg)
+        oct_state = child(self.record, "octagon")
+        oct_state["joined"] = True
+        self.record["octagon"] = oct_state
+        return "SHA256:sponsor"
+
+    monkeypatch.setattr(octagon.OctagonClient, "join_via_escrow", join)
+
+
+def test_device_step_works_on_the_session_a_fresh_sign_in_saves(
+    account: acct.Account, apple: ScriptedApple, apple_cloudkit: FakeCloudKit
+) -> None:
+    # Listing the devices is the first thing that asks Apple for the cloudKitUserId (ckAppInit),
+    # and Apple refuses that call from a client that claims another platform than the token's.
+    del apple
+    assert account.sign_in(APPLE_ID, FAKE_PASSWORD) is acct.SignInStep.DEVICE
+    assert "cloudKitUserId" not in child(_record(account), "mme")
+    assert [d.id for d in account.recovery_devices()] == ["bottle-1", "bottle-2"]
+    assert child(_record(account), "mme")["cloudKitUserId"] == apple_cloudkit.user_id
+
+
+def test_a_restarted_daemon_finishes_a_passed_sign_in_with_the_passcode_alone(
+    account: acct.Account,
+    apple: ScriptedApple,
+    apple_cloudkit: FakeCloudKit,
+    setup_server: Setup,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    del apple_cloudkit
+    _joining(monkeypatch)
+    apple.second_factor = "trusted"
+    assert account.sign_in(APPLE_ID, FAKE_PASSWORD) is acct.SignInStep.CODE
+    assert account.submit_code(apple.code) is acct.SignInStep.DEVICE
+    pushed = list(apple.triggered)
+    restarted = _restarted(account, setup_server)
+    assert restarted.status() == acct.AccountStatus(APPLE_ID, signed_in=True, joined=False)
+    assert [d.id for d in restarted.recovery_devices()] == ["bottle-1", "bottle-2"]
+    assert restarted.join("bottle-1", "1234") is acct.SignInStep.DONE
+    assert restarted.status().joined
+    assert apple.triggered == pushed  # no second verification code went to any device
+
+
+def test_a_refused_sign_in_leaves_the_saved_session_as_it_was(
+    account: acct.Account, apple: ScriptedApple
+) -> None:
+    account.sign_in(APPLE_ID, FAKE_PASSWORD)
+    before = account.paths.session.read_bytes()
+    with pytest.raises(acct.AccountError, match="wrong password"):
+        account.sign_in(APPLE_ID, "not-the-password")
+    assert account.paths.session.read_bytes() == before
+    apple.second_factor = "trusted"
+    account.sign_in(APPLE_ID, FAKE_PASSWORD)
+    with pytest.raises(acct.WrongCode):
+        account.submit_code("000000")
+    assert account.paths.session.read_bytes() == before
+    assert account.status() == acct.AccountStatus(APPLE_ID, signed_in=True, joined=False)
+
+
+def test_each_sign_in_step_is_logged_without_any_secret(
+    account: acct.Account,
+    apple: ScriptedApple,
+    apple_cloudkit: FakeCloudKit,
+    monkeypatch: pytest.MonkeyPatch,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    del apple_cloudkit
+    _joining(monkeypatch, wrong=b"0000")
+    caplog.set_level(logging.INFO, logger=acct.logger.name)
+    apple.second_factor = "trusted"
+    account.sign_in(APPLE_ID, FAKE_PASSWORD)
+    with pytest.raises(acct.WrongCode):
+        account.submit_code("000000")
+    account.submit_code(apple.code)
+    account.recovery_devices()
+    with pytest.raises(acct.WrongPasscode):
+        account.join("bottle-1", "0000")
+    account.join("bottle-1", "1234")
+    steps = [r.getMessage() for r in caplog.records if r.getMessage().startswith("sign-in:")]
+    assert steps == [
+        "sign-in: Apple accepted the sign-in; a verification code was sent to your trusted devices",
+        "sign-in: verification code refused",
+        "sign-in: verification code accepted; signed in, the device passcode is still needed",
+        "sign-in: 2 recovery device(s) listed",
+        "sign-in: the screen lock code of the chosen device was refused",
+        "sign-in: joined iCloud Keychain",
+    ]
+    for secret in (FAKE_PASSWORD, FAKE_PET, FAKE_CK, "FAKE-MME", apple.code, "1234", "0000"):
+        assert secret not in caplog.text
+
+
+def test_a_refused_device_step_says_why_in_the_journal(
+    account: acct.Account,
+    apple: ScriptedApple,
+    monkeypatch: pytest.MonkeyPatch,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    del apple
+    refused = "ckAppInit rejected the mmeAuthToken (HTTP 401); sign in again"
+
+    def ck_app_init(*_a: object, **_k: object) -> str:
+        raise CloudKitError(refused, http_status=401)
+
+    monkeypatch.setattr(cloudkit, "ck_app_init", ck_app_init)
+    caplog.set_level(logging.INFO, logger=acct.logger.name)
+    account.sign_in(APPLE_ID, FAKE_PASSWORD)
+    with pytest.raises(acct.AccountError, match="ckAppInit rejected"):
+        account.recovery_devices()
+    assert f"sign-in: listing the recovery devices failed: {refused}" in caplog.text
+
+
 def test_join_with_the_right_passcode(
     signed_in: acct.Account, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -668,3 +823,75 @@ async def test_remote_store_needing_sign_in_is_auth_required(
 
 def test_status_reads_a_session_from_earlier_versions(joined: acct.Account) -> None:
     assert joined.status() == acct.AccountStatus(APPLE_ID, signed_in=True, joined=True)
+
+
+def test_a_url_with_credentials_in_an_error_never_reaches_the_journal(
+    account: acct.Account, monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+) -> None:
+    down = (
+        "Could not get anisette data from http://user:hunter2@anisette.example:6969/?key=abc123: "
+        "connection refused"
+    )
+
+    def start(*_a: object, **_k: object) -> object:
+        raise AnisetteError(down)
+
+    monkeypatch.setattr(grandslam, "start", start)
+    caplog.set_level(logging.INFO, logger=acct.logger.name)
+    with pytest.raises(acct.AccountError, match="hunter2"):  # the user still sees the cause
+        account.sign_in(APPLE_ID, FAKE_PASSWORD)
+    assert "sign-in: the password step failed" in caplog.text
+    assert "hunter2" not in caplog.text
+    assert "abc123" not in caplog.text
+
+
+@pytest.mark.parametrize(
+    ("failure", "kind"),
+    [
+        (
+            CloudKitError("ckAppInit rejected the mmeAuthToken (HTTP 401)", http_status=401),
+            "refused",
+        ),
+        (CloudKitError("record/sync returned HTTP 403", http_status=403), "refused"),
+        (CloudKitError("ckAppInit returned HTTP 503", http_status=503), "unavailable"),
+        (CloudKitError("network error talking to ckAppInit: timed out"), "unavailable"),
+    ],
+)
+def test_only_a_refused_token_makes_the_device_step_need_a_new_sign_in(
+    account: acct.Account,
+    apple: ScriptedApple,
+    monkeypatch: pytest.MonkeyPatch,
+    failure: CloudKitError,
+    kind: str,
+) -> None:
+    del apple
+
+    def ck_app_init(*_a: object, **_k: object) -> str:
+        raise failure
+
+    monkeypatch.setattr(cloudkit, "ck_app_init", ck_app_init)
+    account.sign_in(APPLE_ID, FAKE_PASSWORD)
+    with pytest.raises(acct.AccountError) as info:
+        account.recovery_devices()
+    assert isinstance(info.value, acct.ServiceUnavailable) is (kind == "unavailable")
+    assert account.status() == acct.AccountStatus(APPLE_ID, signed_in=True, joined=False)
+
+
+def test_an_anisette_outage_while_listing_devices_keeps_the_saved_sign_in(
+    account: acct.Account,
+    apple: ScriptedApple,
+    apple_cloudkit: FakeCloudKit,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    del apple_cloudkit
+    account.sign_in(APPLE_ID, FAKE_PASSWORD)
+    msg = "Could not get anisette data: connection refused"
+
+    def start(*_a: object, **_k: object) -> object:
+        raise AnisetteError(msg)
+
+    monkeypatch.setattr(grandslam, "start", start)
+    with pytest.raises(acct.ServiceUnavailable):
+        account.recovery_devices()
+    assert apple.starts == 1  # the password step ran once, at sign-in
+    assert account.status() == acct.AccountStatus(APPLE_ID, signed_in=True, joined=False)
