@@ -16,6 +16,8 @@ from typing import TYPE_CHECKING
 import pytest
 from tests.integration.cli.install_env import REPO, InstallEnv, make_env
 
+from passwords_app.icloud.const import DEFAULT_ANISETTE_URL
+
 if TYPE_CHECKING:
     from collections.abc import Iterator
     from pathlib import Path
@@ -108,15 +110,46 @@ def test_service_is_enabled_and_restarted(env: InstallEnv) -> None:
     ]
 
 
-def test_anisette_container_is_created_on_loopback_with_a_named_volume(env: InstallEnv) -> None:
+def test_anisette_image_is_built_from_the_checkout_and_run_on_loopback_with_a_named_volume(
+    env: InstallEnv,
+) -> None:
     installed(env)
     docker = env.calls("docker")
-    assert docker[0] == "container inspect passwords-app-anisette"
-    run = docker[1]
-    assert run.startswith("run -d --name passwords-app-anisette --restart unless-stopped")
+    assert docker[0] == "container inspect passwords-app-anisette-windows"
+    assert docker[1].startswith("image inspect --format ")
+    build = docker[2]
+    assert build.startswith("build --label io.github.alex_mextner.passwords.anisette-source=")
+    assert build.endswith(f"-t passwords-app-anisette-windows:local {env.checkout}/docker/anisette")
+    run = next(c for c in docker if c.startswith("run "))
+    assert run.startswith("run -d --name passwords-app-anisette-windows --restart unless-stopped")
     assert f"-p 127.0.0.1:{env.anisette_port}:6969" in run
-    assert "-v passwords-app-anisette:/home/Alcoholic/.config/anisette-v3/lib" in run
-    assert run.endswith("dadoum/anisette-v3-server:latest")
+    assert "-v passwords-app-anisette-windows:/state" in run
+    assert "--cap-drop ALL" in run
+    assert run.endswith("passwords-app-anisette-windows:local")
+
+
+def test_the_installers_default_port_is_the_clients_default_anisette_port() -> None:
+    script = (REPO / "scripts" / "install.sh").read_text()
+    port = re.search(r"^ANISETTE_PORT=\$\{ANISETTE_PORT:-(\d+)\}", script, re.MULTILINE)
+    assert port is not None
+    assert f"http://localhost:{port.group(1)}" == DEFAULT_ANISETTE_URL
+
+
+def test_a_failed_image_build_is_a_warning_and_creates_no_container(env: InstallEnv) -> None:
+    (env.fakebin / "docker").write_text("#!/bin/bash\nexit 1\n")
+    result = env.run("install.sh")
+    assert result.returncode == 0
+    assert "could not build passwords-app-anisette-windows:local" in result.stderr
+    assert "docker-container" not in (env.app_data / "installed-files").read_text()
+
+
+def test_the_android_container_on_6969_is_never_reused_or_touched(env: InstallEnv) -> None:
+    (env.docker_state / "passwords-app-anisette").touch()
+    installed(env)
+    docker = env.calls("docker")
+    assert not any(
+        "passwords-app-anisette " in c or c.endswith("passwords-app-anisette") for c in docker
+    )
 
 
 def test_manifest_lists_every_installed_path(env: InstallEnv) -> None:
@@ -125,7 +158,7 @@ def test_manifest_lists_every_installed_path(env: InstallEnv) -> None:
     assert str(unit_file(env)) in lines
     assert str(env.data / "dbus-1" / "services" / DBUS_SERVICE) in lines
     assert str(env.home / ".local" / "bin" / "passwords-app") in lines
-    assert "docker-container:passwords-app-anisette" in lines
+    assert "docker-container:passwords-app-anisette-windows" in lines
     assert len(lines) == len(set(lines))
     # Polkit actions are recorded but installed by the user through the printed pkexec command.
     files = [p for p in lines if not p.startswith(("docker-container:", "polkit-action:"))]
@@ -151,8 +184,8 @@ def test_second_run_converges_to_the_same_layout(env: InstallEnv) -> None:
     assert env.tree() == first
     assert [c for c in env.calls("uv") if c.startswith("venv")] == []  # venv reused
     docker = env.calls("docker")
-    assert "start passwords-app-anisette" in docker
-    assert not any(c.startswith("run") for c in docker)
+    assert "start passwords-app-anisette-windows" in docker
+    assert not any(c.startswith(("run", "build")) for c in docker)
 
 
 def test_update_removes_files_the_new_version_no_longer_ships(env: InstallEnv) -> None:
@@ -391,7 +424,7 @@ def test_running_anisette_is_left_alone(env: InstallEnv) -> None:
     result = env.run("install.sh")
     assert result.returncode == 0
     assert "already answers" in result.stdout
-    assert env.calls("docker") == []
+    assert env.calls("docker") == ["container inspect passwords-app-anisette-windows"]
     assert "docker-container" not in (env.app_data / "installed-files").read_text()
 
 
@@ -452,7 +485,7 @@ def test_uninstall_removes_the_installation_but_keeps_data(env: InstallEnv) -> N
     assert (env.app_config / "session.enc").read_bytes() == b"session"
     assert "Kept your data" in result.stdout
     assert f"--user disable --now {UNIT}" in env.calls("systemctl")
-    assert env.calls("docker") == ["rm -f passwords-app-anisette"]
+    assert env.calls("docker") == ["rm -f passwords-app-anisette-windows"]
 
 
 def test_uninstall_purge_removes_data_too(env: InstallEnv) -> None:
@@ -464,7 +497,9 @@ def test_uninstall_purge_removes_data_too(env: InstallEnv) -> None:
     assert result.returncode == 0
     assert not env.app_data.exists()
     assert not env.app_config.exists()
-    assert "volume rm passwords-app-anisette" in env.calls("docker")
+    docker = env.calls("docker")
+    assert "volume rm passwords-app-anisette-windows" in docker
+    assert "image rm passwords-app-anisette-windows:local" in docker
     assert "keyring" in result.stdout
 
 
@@ -555,3 +590,22 @@ def test_installed_unit_passes_systemd_analyze_verify(env: InstallEnv) -> None:
     assert result.returncode == 0, result.stderr
     ours = [line for line in result.stderr.splitlines() if UNIT in line]
     assert ours == [], ours
+
+
+def test_a_changed_checkout_rebuilds_the_image_and_recreates_the_container_keeping_the_volume(
+    env: InstallEnv,
+) -> None:
+    installed(env)
+    (env.checkout / "docker" / "anisette" / "server.py").write_text("# a newer helper\n")
+    env.clear_calls()
+    installed(env)
+    docker = env.calls("docker")
+    assert any(c.startswith("build --label ") for c in docker)
+    assert "rm -f passwords-app-anisette-windows" in docker
+    assert any(c.startswith("run -d --name passwords-app-anisette-windows") for c in docker)
+    assert not any(c.startswith("volume rm") for c in docker)
+    env.clear_calls()
+    installed(env)
+    docker = env.calls("docker")
+    assert not any(c.startswith(("build", "run", "rm")) for c in docker)
+    assert "start passwords-app-anisette-windows" in docker

@@ -4,7 +4,7 @@
 #
 # Remove what install.sh installed. Your data stays unless --purge is given: state.db (the
 # sync state and Recently Deleted) in $XDG_DATA_HOME/passwords-app, the iCloud session in
-# $XDG_CONFIG_HOME/passwords-app, and the anisette volume. The passwords themselves live in
+# $XDG_CONFIG_HOME/passwords-app, and the anisette volume and image. The passwords themselves live in
 # the "iCloud Passwords" keyring collection and are never touched by this script.
 #
 # Overridable: SYSTEMCTL, DOCKER, GLIB_COMPILE_SCHEMAS, UPDATE_DESKTOP_DATABASE,
@@ -23,7 +23,6 @@ DOCKER=${DOCKER:-docker}
 GLIB_COMPILE_SCHEMAS=${GLIB_COMPILE_SCHEMAS:-glib-compile-schemas}
 UPDATE_DESKTOP_DATABASE=${UPDATE_DESKTOP_DATABASE:-update-desktop-database}
 GTK_UPDATE_ICON_CACHE=${GTK_UPDATE_ICON_CACHE:-gtk-update-icon-cache}
-ANISETTE_VOLUME=passwords-app-anisette
 UNIT=passwords-appd.service
 
 say() { printf '%s\n' "$*"; }
@@ -67,7 +66,8 @@ if [[ -f $manifest ]]; then
         if have "$DOCKER"; then
           "$DOCKER" rm -f "${line#docker-container:}" >/dev/null 2>&1 || true
           if ((purge)); then
-            "$DOCKER" volume rm "$ANISETTE_VOLUME" >/dev/null 2>&1 || true
+            "$DOCKER" volume rm "${line#docker-container:}" >/dev/null 2>&1 || true
+            "$DOCKER" image rm passwords-app-anisette-windows:local >/dev/null 2>&1 || true
           fi
         fi
         ;;

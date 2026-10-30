@@ -20,8 +20,10 @@ WINDOWS_PLATFORM = "<PC> <Windows;6.2(0,0);9200>"
 # AuthKit device description used by GrandSlam and its 2FA endpoints.
 GSA_CLIENT_INFO = f"{WINDOWS_PLATFORM} <com.apple.AuthKit/1 (com.apple.akd/1.0)>"
 
-# Default anisette server (SideStore ecosystem). Override with PASSWORDS_APP_ANISETTE_URL.
-DEFAULT_ANISETTE_URL = "http://localhost:6969"
+# The local anisette server `scripts/install.sh` starts (docker/anisette: Apple's Windows ADI under
+# Wine). Override with PASSWORDS_APP_ANISETTE_URL. Not the Android-based
+# dadoum/anisette-v3-server on 6969: Apple refuses its data with ec=-80045 (passwords-app#144).
+DEFAULT_ANISETTE_URL = "http://localhost:6970"
 
 GSA_BASE_URL = "https://gsa.apple.com"
 GSA_SERVICE_PATH = "/grandslam/GsService2"

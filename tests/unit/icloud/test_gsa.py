@@ -158,3 +158,33 @@ def test_non_success_plist_preserves_apple_status(http: _Http, client: GSAClient
     assert "HTTP 401" in message
     assert "ec=-20101" in message
     assert "bad account" in message
+
+
+@pytest.mark.parametrize("code", [-20970, -80045])
+def test_probe_client_returns_apples_answer_for_an_account_nobody_owns(
+    http: _Http, client: GSAClient, code: int
+) -> None:
+    http.answer = lambda **_: _plist_response({"Status": {"ec": code, "em": "x"}})
+
+    assert client.probe_client() == code
+
+    sent = plistlib.loads(http.captured["data"])["Request"]
+    assert sent["o"] == "init"
+    assert sent["u"].endswith("@example.invalid")
+    assert set(sent) >= {"A2k", "ps", "cpd"}
+
+
+def test_probe_client_without_a_status_code_is_none(http: _Http, client: GSAClient) -> None:
+    http.answer = lambda **_: _plist_response({"Status": {}})
+    assert client.probe_client() is None
+
+
+def test_probe_client_asks_about_a_fresh_account_name_each_time(
+    http: _Http, client: GSAClient
+) -> None:
+    names = []
+    for _ in range(2):
+        client.probe_client()
+        names.append(plistlib.loads(http.captured["data"])["Request"]["u"])
+
+    assert names[0] != names[1]

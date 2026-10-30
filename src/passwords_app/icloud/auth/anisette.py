@@ -80,8 +80,12 @@ class Anisette:
         except (requests.RequestException, ValueError) as e:
             msg = (
                 f"Could not get anisette data from {self.url}: {e}\n"
-                "Start one, e.g.: docker run -d -p 6969:6969 dadoum/anisette-server:latest\n"
-                "or set PASSWORDS_APP_ANISETTE_URL to a running instance."
+                "`passwords-app install` builds and starts the local one (Apple's Windows ADI "
+                "under Wine, docker/anisette); `docker start passwords-app-anisette-windows` "
+                "restarts it.\n"
+                "Or set PASSWORDS_APP_ANISETTE_URL to a server whose data Apple accepts "
+                "(Windows or macOS ADI). The Android-based dadoum/anisette-v3-server is "
+                "refused with ec=-80045."
             )
             raise AnisetteError(msg) from e
 

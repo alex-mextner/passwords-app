@@ -32,10 +32,15 @@ MSGFMT=${MSGFMT:-msgfmt}
 UPDATE_DESKTOP_DATABASE=${UPDATE_DESKTOP_DATABASE:-update-desktop-database}
 GTK_UPDATE_ICON_CACHE=${GTK_UPDATE_ICON_CACHE:-gtk-update-icon-cache}
 POLKIT_ACTIONS_DIR=${POLKIT_ACTIONS_DIR:-/usr/share/polkit-1/actions}
-ANISETTE_PORT=${ANISETTE_PORT:-6969}
-ANISETTE_IMAGE=dadoum/anisette-v3-server:latest
-ANISETTE_CONTAINER=passwords-app-anisette
-ANISETTE_VOLUME=passwords-app-anisette
+# Apple refuses the anisette data of the Android-based dadoum/anisette-v3-server since 2026-10-12
+# (ec=-80045, passwords-app#144), so the container runs Apple's Windows ADI library under Wine, built
+# from docker/anisette. It has its own name, volume and port (6970): a leftover Android container on
+# 6969 is never reused and stays untouched.
+ANISETTE_PORT=${ANISETTE_PORT:-6970}
+ANISETTE_IMAGE=passwords-app-anisette-windows:local
+ANISETTE_CONTAINER=passwords-app-anisette-windows
+ANISETTE_VOLUME=passwords-app-anisette-windows
+ANISETTE_LABEL=io.github.alex_mextner.passwords.anisette-source
 UNIT=passwords-appd.service
 
 say() { printf '%s\n' "$*"; }
@@ -88,28 +93,76 @@ anisette_answers() {
   (exec 3<>"/dev/tcp/127.0.0.1/$ANISETTE_PORT") 2>/dev/null
 }
 
+# A fingerprint of everything the image is built from: a changed helper or Dockerfile in the
+# checkout rebuilds the image and recreates the container (the volume with the identity stays).
+anisette_source_hash() {
+  (cd -- "$src/docker/anisette" 2>/dev/null &&
+    find . -type f -print0 | sort -z | xargs -0 sha256sum | sha256sum | cut -d' ' -f1)
+}
+
+docker_label() {
+  "$DOCKER" "$1" inspect --format "{{ index .Config.Labels \"$ANISETTE_LABEL\" }}" "$2" 2>/dev/null || true
+}
+
+create_anisette_container() {
+  # Published on loopback only: the helper must never be reachable from the network. The named
+  # volume holds the Wine prefix, i.e. the device identity Apple trusts: keep it across container
+  # upgrades.
+  "$DOCKER" run -d --name "$ANISETTE_CONTAINER" --restart unless-stopped --init \
+    --label "$ANISETTE_LABEL=$1" \
+    --memory 512m --memory-swap 768m --cap-drop ALL --security-opt no-new-privileges \
+    -p "127.0.0.1:$ANISETTE_PORT:6969" \
+    -v "$ANISETTE_VOLUME:/state" \
+    "$ANISETTE_IMAGE" >/dev/null || warn "could not create the $ANISETTE_CONTAINER container"
+}
+
+build_anisette_image() {
+  say "Building the anisette image: it downloads Apple's iCloud for Windows installers (about 320 MB) and stays on this machine."
+  "$DOCKER" build --label "$ANISETTE_LABEL=$1" -t "$ANISETTE_IMAGE" "$src/docker/anisette" >/dev/null
+}
+
 setup_anisette() {
+  local want exists=0
   if [[ ${PASSWORDS_APP_SKIP_ANISETTE:-0} == 1 ]]; then
     return 0
   fi
-  if anisette_answers; then
-    say "Apple sign-in helper (anisette) already answers on 127.0.0.1:$ANISETTE_PORT."
-    return 0
-  fi
   if ! have "$DOCKER"; then
+    if anisette_answers; then
+      say "Apple sign-in helper (anisette) already answers on 127.0.0.1:$ANISETTE_PORT."
+      return 0
+    fi
     warn "docker is not installed; Apple sign-in needs an anisette server on 127.0.0.1:$ANISETTE_PORT."
-    warn "Install docker and re-run this script, or start $ANISETTE_IMAGE yourself."
+    warn "Install docker and re-run this script, or run one that serves Windows or macOS ADI data yourself"
+    warn "and point PASSWORDS_APP_ANISETTE_URL at it (the Android-based dadoum/anisette-v3-server is refused by Apple)."
     return 0
   fi
   if "$DOCKER" container inspect "$ANISETTE_CONTAINER" >/dev/null 2>&1; then
-    "$DOCKER" start "$ANISETTE_CONTAINER" >/dev/null || warn "could not start $ANISETTE_CONTAINER"
+    exists=1
+  elif anisette_answers; then
+    say "Apple sign-in helper (anisette) already answers on 127.0.0.1:$ANISETTE_PORT."
+    return 0
+  fi
+  want=$(anisette_source_hash) || want=
+  if [[ -z $want ]]; then
+    warn "$src/docker/anisette is missing; cannot build the anisette image."
+    return 0
+  fi
+  if [[ $(docker_label image "$ANISETTE_IMAGE") != "$want" ]]; then
+    build_anisette_image "$want" || warn "could not build $ANISETTE_IMAGE from $src/docker/anisette"
+  fi
+  if ((exists)); then
+    if [[ $(docker_label container "$ANISETTE_CONTAINER") != "$want" ]] &&
+      [[ $(docker_label image "$ANISETTE_IMAGE") == "$want" ]]; then
+      say "Replacing $ANISETTE_CONTAINER with one from the updated image (its volume is kept)."
+      "$DOCKER" rm -f "$ANISETTE_CONTAINER" >/dev/null
+      create_anisette_container "$want"
+    else
+      "$DOCKER" start "$ANISETTE_CONTAINER" >/dev/null || warn "could not start $ANISETTE_CONTAINER"
+    fi
+  elif [[ $(docker_label image "$ANISETTE_IMAGE") == "$want" ]]; then
+    create_anisette_container "$want"
   else
-    # Published on loopback only: the helper must never be reachable from the network. The
-    # named volume keeps its device provisioning across container upgrades.
-    "$DOCKER" run -d --name "$ANISETTE_CONTAINER" --restart unless-stopped \
-      -p "127.0.0.1:$ANISETTE_PORT:6969" \
-      -v "$ANISETTE_VOLUME:/home/Alcoholic/.config/anisette-v3/lib" \
-      "$ANISETTE_IMAGE" >/dev/null || warn "could not create the $ANISETTE_CONTAINER container"
+    return 0
   fi
   record "docker-container:$ANISETTE_CONTAINER"
 }

@@ -14,6 +14,7 @@ import hashlib
 import hmac
 import logging
 import plistlib
+import uuid
 from typing import TYPE_CHECKING, Any, Protocol, cast
 
 import requests
@@ -48,6 +49,12 @@ logger = logging.getLogger(__name__)
 
 _TIMEOUT = 10
 _S2K_PROTOCOLS = ("s2k", "s2k_fo")
+# `.invalid` never resolves to a real Apple ID (RFC 2606). Every probe uses a fresh name: Apple
+# throttles a name asked about over and over (ec=-20209 "locked for security reasons" after about
+# ten init requests), which would read as a verdict on the client.
+PROBE_APPLE_ID_DOMAIN = "example.invalid"
+ACCEPTED_CLIENT_CODE = -20970
+REFUSED_CLIENT_CODE = -80045
 _PLIST_PREFIXES = (b"<?xml", b"bplist", b"<plist")
 
 
@@ -145,11 +152,26 @@ class GSAClient:
             raise GSAError(msg)
         return mapping(response)
 
-    def authenticate(self, username: str, password: str, stage: str) -> tuple[Record, Record]:
+    def _init(self, username: str) -> tuple[_SrpUser, Record]:
         usr = cast("_SrpUser", _srp.User(username, b"", hash_alg=_srp.SHA256, ng_type=_srp.NG_2048))
         _, a_pub = usr.start_authentication()
-
         init = self._request({"A2k": a_pub, "ps": list(_S2K_PROTOCOLS), "u": username, "o": "init"})
+        return usr, init
+
+    def probe_client(self) -> int | None:
+        """Apple's verdict on this client and its anisette data, asked with no account at all.
+
+        One init-only request for an Apple ID nobody owns, so no password, no 2FA code and no
+        real account are involved. Apple answers `ACCEPTED_CLIENT_CODE` ("entered incorrectly")
+        when it accepts the client and `REFUSED_CLIENT_CODE` when it refuses it before even looking
+        up the account: anisette data it no longer accepts (Dadoum/anisette-v3-server#61) or a
+        client identity that does not match that data. Returns the answer's `ec`.
+        """
+        _, init = self._init(f"anisette-probe-{uuid.uuid4().hex[:12]}@{PROBE_APPLE_ID_DOMAIN}")
+        return integer(mapping(init.get("Status", init)), "ec")
+
+    def authenticate(self, username: str, password: str, stage: str) -> tuple[Record, Record]:
+        usr, init = self._init(username)
         self.last_init_response = init
         logger.debug("GSA init response keys: %s", list(init))
         protocol, salt, server_b, iterations, cookie = _srp_challenge(init, stage)
