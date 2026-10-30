@@ -15,7 +15,7 @@ import os
 import re
 import shlex
 import ssl
-import subprocess
+import subprocess  # nosec B404 - runs systemctl --user show only, fixed argv, no shell
 from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING, Literal, cast
@@ -104,7 +104,7 @@ def _main_pid() -> int | None:
 
 def _systemctl_show(prop: str) -> str | None:
     try:
-        done = subprocess.run(  # noqa: S603 - fixed argv, no shell
+        done = subprocess.run(  # noqa: S603  # nosec B603 B607 - fixed argv, no shell
             ["systemctl", "--user", "show", SERVICE_UNIT, f"--property={prop}", "--value"],  # noqa: S607
             capture_output=True,
             text=True,
