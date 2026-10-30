@@ -117,7 +117,7 @@ exclude_also = ["if TYPE_CHECKING:", "raise NotImplementedError", "\\.\\.\\.$"]
 # ---------------------------------------------------------------- lint
 [tool.ruff]
 line-length = 100
-# Vendored unchanged from hinatamaxxx/AltServer-Linux; see THIRD_PARTY_NOTICES.md.
+# Derived from hinatamaxxx/AltServer-Linux and modified; see THIRD_PARTY_NOTICES.md.
 extend-exclude = ["docker/anisette"]
 target-version = "py313"
 src = ["src", "tests"]

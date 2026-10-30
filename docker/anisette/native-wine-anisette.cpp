@@ -1,3 +1,5 @@
+// Modified by Alex Mextner on 2026-10-30: split `main` into loadRuntime, ensureProvisioned and anisetteJson (behaviour unchanged).
+// Based on hinatamaxxx/AltServer-Linux anisette/icloud-wine (AGPL-3.0, commit 6272cce175413ee64d0baead62683b2b9ba0f83c).
 // Standalone native iCloud anisette helper for an isolated Wine prefix.
 // ABI reference: AltServer-Windows AnisetteDataManager.cpp, iCloud_main 261.7.0.49.
 // No account credentials, binary patching, or client-identity swizzling.

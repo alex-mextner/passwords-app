@@ -1,3 +1,5 @@
+# Modified by Alex Mextner on 2026-10-30: added a five-second answer cache (`fetch` wraps `run_helper`), so one Wine run serves a burst of callers.
+# Based on hinatamaxxx/AltServer-Linux anisette/icloud-wine (AGPL-3.0, commit 6272cce175413ee64d0baead62683b2b9ba0f83c).
 """Local Wine/iCloud anisette provider. No Apple account credentials, no remote calls."""
 from datetime import datetime, timezone
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer

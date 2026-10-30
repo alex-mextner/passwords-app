@@ -33,13 +33,20 @@ SOFTWARE.
 
 ## Windows-ADI anisette helper (AGPL-3.0-only)
 
-`docker/anisette/native-wine-anisette.cpp`, `server.py` and `start.sh` come from
-<https://github.com/hinatamaxxx/AltServer-Linux> (`anisette/icloud-wine`, commit
+Everything in `docker/anisette/` (`Dockerfile`, `native-wine-anisette.cpp`, `server.py`, `start.sh`) is
+derived from <https://github.com/hinatamaxxx/AltServer-Linux> (`anisette/icloud-wine`, commit
 `6272cce175413ee64d0baead62683b2b9ba0f83c`, AGPL-3.0, itself built on AltServer for Windows by
-Riley Testut), with three changes: `main` of the helper split into functions, a shellcheck directive in
-`start.sh`, and a five-second answer cache in `server.py` (one Wine run serves a burst of callers). They run as a separate program inside a Docker image, never linked into
-the app. Apple's iCloud for Windows libraries are downloaded from Apple's servers when the image is
-built on your machine and are not part of this repository.
+Riley Testut) and is licensed AGPL-3.0-only (`LICENSES/AGPL-3.0-only.txt`). It runs as a separate program
+inside a Docker image and is never linked into the app. Apple's iCloud for Windows libraries are downloaded
+from Apple's servers when the image is built on your machine and are not part of this repository.
+
+Modified by Alex Mextner on 2026-10-30 (each file says so in its header):
+
+- `Dockerfile`: added the `apple` stage that downloads Apple's installers and checks them against pinned
+  SHA-256 sums, instead of mounting an exported runtime.
+- `native-wine-anisette.cpp`: `main` split into `loadRuntime`, `ensureProvisioned` and `anisetteJson`.
+- `server.py`: a five-second answer cache, so one Wine run serves a burst of callers.
+- `start.sh`: a shellcheck directive.
 
 ## Apple root certificates
 

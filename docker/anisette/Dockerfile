@@ -1,5 +1,10 @@
-# SPDX-FileCopyrightText: 2026 Alex Mextner
-# SPDX-License-Identifier: MIT
+# SPDX-FileCopyrightText: 2026 Alex Mextner, hinatamaxxx and AltServer-Linux contributors
+# SPDX-License-Identifier: AGPL-3.0-only
+#
+# AGPL-3.0-only, like the upstream Dockerfile it is derived from (same helper and runtime stages, same Debian
+# digest). Based on hinatamaxxx/AltServer-Linux anisette/icloud-wine (AGPL-3.0, commit 6272cce175413ee64d0baead62683b2b9ba0f83c).
+# Modified by Alex Mextner on 2026-10-30: added the `apple` stage that downloads Apple's iCloud for Windows
+# installers and checks them against pinned SHA-256 sums, instead of mounting an exported runtime.
 #
 # Local anisette server for Apple sign-in: Apple's own Windows iCloud ADI library run under Wine.
 #

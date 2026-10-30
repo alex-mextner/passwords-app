@@ -1,4 +1,6 @@
 #!/bin/sh
+# Modified by Alex Mextner on 2026-10-30: added a shellcheck directive before the registry call.
+# Based on hinatamaxxx/AltServer-Linux anisette/icloud-wine (AGPL-3.0, commit 6272cce175413ee64d0baead62683b2b9ba0f83c).
 set -eu
 umask 077
 mkdir -p /state/prefix
