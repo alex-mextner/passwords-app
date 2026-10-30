@@ -14,6 +14,18 @@ precedence = "aggregate"
 SPDX-FileCopyrightText = ["2026 Sankarsh Makam", "2026 Alex Mextner"]
 SPDX-License-Identifier = "MIT"
 
+# The Windows-ADI anisette helper, vendored from hinatamaxxx/AltServer-Linux (AGPL-3.0), modified (see THIRD_PARTY_NOTICES.md);
+# the Dockerfile next to it is ours and carries its own MIT header.
+[[annotations]]
+path = [
+    "docker/anisette/native-wine-anisette.cpp",
+    "docker/anisette/server.py",
+    "docker/anisette/start.sh",
+]
+precedence = "override"
+SPDX-FileCopyrightText = "2026 hinatamaxxx and AltServer-Linux contributors"
+SPDX-License-Identifier = "AGPL-3.0-only"
+
 # Apple's public root CAs, pinned for gsa.apple.com; not ours to license.
 [[annotations]]
 path = "src/passwords_app/icloud/certs/apple-roots.pem"

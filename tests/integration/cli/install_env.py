@@ -41,13 +41,34 @@ exit "${FAKE_SYSTEMCTL_RC:-0}"
     "docker": r"""#!/bin/bash
 printf 'docker\t%s\n' "$*" >>"$CALLS"
 state=$FAKE_DOCKER_STATE
+last=${!#}
+label=""
+name=""
+tag=""
+format=0
+args=("$@")
+for ((i = 0; i < $#; i++)); do
+  case ${args[i]} in
+    --label) label=${args[i + 1]#*=} ;;
+    --name) name=${args[i + 1]} ;;
+    -t) tag=${args[i + 1]} ;;
+    --format) format=1 ;;
+  esac
+done
+# A container or image is a file; its content is the source label it was made with.
 case "$1 $2" in
-  "container inspect") [[ -f $state/$3 ]] ;;
-  "run -d")
-    name=""
-    while (($#)); do [[ $1 == --name ]] && name=$2; shift; done
-    touch "$state/$name" ;;
+  "container inspect")
+    [[ -f $state/$last ]] || exit 1
+    ((format)) && cat "$state/$last"
+    exit 0 ;;
+  "image inspect")
+    [[ -f $state/image-$last ]] || exit 1
+    ((format)) && cat "$state/image-$last"
+    exit 0 ;;
+  "run -d") printf '%s' "$label" >"$state/$name" ;;
   "rm -f") rm -f "$state/$3" ;;
+  "image rm") rm -f "$state/image-$3" ;;
+  "build --label") printf '%s' "$label" >"$state/image-$tag" ;;
   *) exit 0 ;;
 esac
 """,
@@ -199,6 +220,7 @@ def make_env(root: Path) -> InstallEnv:
     checkout = root / "checkout"
     checkout.mkdir()
     shutil.copytree(REPO / "scripts", checkout / "scripts")
+    shutil.copytree(REPO / "docker", checkout / "docker")
     shutil.copytree(REPO / "data", checkout / "data", ignore=_skip_app_data)
     shutil.copy(REPO / "pyproject.toml", checkout / "pyproject.toml")
     fakebin = root / "fakebin"

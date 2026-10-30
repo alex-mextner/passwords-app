@@ -27,10 +27,10 @@ if TYPE_CHECKING:
 pytestmark = [pytest.mark.integration, pytest.mark.timeout(60)]
 
 
-def closed_port() -> tuple[str, int]:
+def closed_url() -> str:
     with socket.socket() as s:
         s.bind(("127.0.0.1", 0))
-        return "127.0.0.1", int(s.getsockname()[1])
+        return f"http://127.0.0.1:{s.getsockname()[1]}"
 
 
 @pytest.mark.usefixtures("private_session")
@@ -56,7 +56,7 @@ def by_name(checks: list[doctor.Check]) -> dict[str, doctor.Check]:
 
 @pytest.mark.usefixtures("private_session")
 async def test_doctor_without_daemon(tmp_path: Path) -> None:
-    checks = by_name(await doctor.run_checks(tmp_path, anisette=closed_port()))
+    checks = by_name(await doctor.run_checks(tmp_path, anisette_url=closed_url()))
     assert checks["Sync service (passwords-appd)"].level == "fail"
     assert "Sync state" not in checks
     assert checks["Apple sign-in helper (anisette)"].level == "fail"
@@ -72,7 +72,7 @@ async def test_doctor_with_daemon_and_keyring(
         await SecretServiceStore.open(bus)  # creates and unlocks the collection
     finally:
         bus.disconnect()
-    checks = by_name(await doctor.run_checks(tmp_path, anisette=closed_port()))
+    checks = by_name(await doctor.run_checks(tmp_path, anisette_url=closed_url()))
     assert checks["Sync service (passwords-appd)"].level == "ok"
     assert checks["Sync state"].level == "ok"
     assert checks['Keyring collection "iCloud Passwords"'].level == "ok"
@@ -87,7 +87,7 @@ async def test_doctor_reports_a_locked_collection(
     finally:
         bus.disconnect()
     await lock_collection(private_session.address, store.collection)
-    check = by_name(await doctor.run_checks(tmp_path, anisette=closed_port()))[
+    check = by_name(await doctor.run_checks(tmp_path, anisette_url=closed_url()))[
         'Keyring collection "iCloud Passwords"'
     ]
     assert (check.level, check.detail) == ("warn", "locked")
@@ -96,8 +96,8 @@ async def test_doctor_reports_a_locked_collection(
 async def test_doctor_cli_json_and_exit_code(
     running: RunningDaemon, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
-    _host, port = closed_port()
-    monkeypatch.setattr(doctor, "ANISETTE_PORT", port)
+    monkeypatch.setattr(doctor, "service_anisette_url", lambda: None)
+    monkeypatch.setenv(doctor.ANISETTE_URL_VARIABLE, closed_url())
     monkeypatch.setenv("HOME", str(tmp_path))
     term = ScriptedTerminal()
     code = await asyncio.to_thread(cli.main, ["doctor", "--json"], ctx=cli.Context(terminal=term))

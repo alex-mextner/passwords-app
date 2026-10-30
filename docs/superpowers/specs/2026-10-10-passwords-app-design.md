@@ -35,7 +35,7 @@ decrypted keychain is pure risk and nothing here needs a server.)
 ```
 iPhone/Mac ─┐
             ├─ iCloud (CloudKit: Octagon trust, CKKS "Passwords" zone, shared groups)
-Linux:      │      ▲  HTTPS (GSA/anisette auth)          anisette-v3-server (docker, 127.0.0.1:6969)
+Linux:      │      ▲  HTTPS (GSA/anisette auth)          local anisette (docker, 127.0.0.1:6970)
             │      │
    passwords-appd (systemd --user, D-Bus io.github.alex_mextner.Passwords)
      ├─ icloud/        protocol client: auth, Octagon join, CKKS decrypt + encrypt, save/delete

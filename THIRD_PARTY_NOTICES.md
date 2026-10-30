@@ -31,6 +31,16 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 ```
 
+## Windows-ADI anisette helper (AGPL-3.0-only)
+
+`docker/anisette/native-wine-anisette.cpp`, `server.py` and `start.sh` come from
+<https://github.com/hinatamaxxx/AltServer-Linux> (`anisette/icloud-wine`, commit
+`6272cce175413ee64d0baead62683b2b9ba0f83c`, AGPL-3.0, itself built on AltServer for Windows by
+Riley Testut), with three changes: `main` of the helper split into functions, a shellcheck directive in
+`start.sh`, and a five-second answer cache in `server.py` (one Wine run serves a burst of callers). They run as a separate program inside a Docker image, never linked into
+the app. Apple's iCloud for Windows libraries are downloaded from Apple's servers when the image is
+built on your machine and are not part of this repository.
+
 ## Apple root certificates
 
 `src/passwords_app/icloud/certs/apple-roots.pem` contains Apple's public root CA
