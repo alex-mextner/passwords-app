@@ -115,6 +115,11 @@ class ContentScript {
       sendResponse(reply);
       return false;
     });
+    // A field focused before this script ran sent its focusin to nobody: the page focused it
+    // while loading, or the user clicked right after load (Firefox runs document_end scripts
+    // only after the load event). Offer its menu now instead of waiting for another click.
+    const focused = deepActiveElement(this.doc);
+    if (focused instanceof HTMLInputElement && this.doc.hasFocus()) void this.openFor(focused);
     // The top frame shows the prompt after a login navigated the page; a frame that submitted
     // and navigated on its own asks too (the background only answers the frame that captured).
     void this.showPendingPrompt();
@@ -159,7 +164,11 @@ class ContentScript {
   private async onFocus(event: Event): Promise<void> {
     if (!event.isTrusted) return;
     const target = event.composedPath()[0];
-    if (!(target instanceof HTMLInputElement)) return;
+    if (target instanceof HTMLInputElement) await this.openFor(target);
+  }
+
+  /** Show the dropdown under `target` when it is a credential field with something to offer. */
+  private async openFor(target: HTMLInputElement): Promise<void> {
     let located = this.locate(target);
     if (located === null) {
       this.rescan();

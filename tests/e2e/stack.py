@@ -13,7 +13,8 @@
 
 Helpers act on each surface the way its user would: `apple` is the iPhone, `keyring` is
 Seahorse, `daemon` is any D-Bus client, `app` the GTK window, `firefox`/`chromium` the browsers.
-Every wait is `wait_until`: poll with a deadline, never a bare sleep.
+Every wait is `wait_until`: poll with a deadline, never a bare sleep. At teardown the daemon's
+and the native hosts' logs are copied to `LOGS/<test>/`, which CI uploads with the proof.
 """
 
 from __future__ import annotations
@@ -21,6 +22,7 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import json
+import shutil
 import signal
 import subprocess
 import sys
@@ -32,6 +34,7 @@ from typing import TYPE_CHECKING, Any, cast
 
 from dbus_fast import Message, MessageType, Variant
 from dbus_fast.aio import MessageBus
+from tests.browser.e2e_support import NATIVE_HOST_LOG
 from tests.e2e.apple import AppleServices, Phone
 from tests.fakes.cloudkit_server import FakeCloudKit
 from tests.fakes.icloud_session import DEVICE, make_session
@@ -56,6 +59,8 @@ if TYPE_CHECKING:
 
 REPO = Path(__file__).resolve().parents[2]
 HERE = Path(__file__).resolve().parent
+# Ignored by git; CI uploads docs/proof/** as the e2e-proof artifact.
+LOGS = REPO / "docs" / "proof" / "raw" / "e2e" / "logs"
 COLLECTION_LABEL = "iCloud Passwords"
 NOTE_SCHEMA = "org.gnome.keyring.Note"
 # The daemon's own timings, shrunk so "every minute" and "2 s after a change" fit a test.
@@ -530,9 +535,27 @@ class Stack:
             except subprocess.TimeoutExpired:
                 self.process.kill()
                 self.process.wait(5)
+        try:
+            self.keep_logs()
+        except OSError as exc:
+            errors.append(exc)
         self._exit.close()
         if errors:
             raise errors[0]
+
+    def keep_logs(self) -> None:
+        """Copy every daemon run's log and each browser's native host log to `LOGS/<test>/`:
+        when a scenario fails in CI, its cause has to be readable from the uploaded artifact."""
+        target = LOGS / self._request.node.name
+        shutil.rmtree(target, ignore_errors=True)  # an earlier local run of the same test
+        target.mkdir(parents=True, exist_ok=True)
+        for log in sorted(self.root.glob("passwords-appd-*.log")):
+            shutil.copy2(log, target / log.name)
+        # From every browser home, including one whose session failed to start; there is no
+        # log when the extension never asked its host.
+        for host_log in sorted(self.root.glob(f"*-home/{NATIVE_HOST_LOG}")):
+            browser = host_log.parent.name.removesuffix("-home")
+            shutil.copy2(host_log, target / f"native-host-{browser}.log")
 
     # --- cross-surface views ----------------------------------------------------------------
 

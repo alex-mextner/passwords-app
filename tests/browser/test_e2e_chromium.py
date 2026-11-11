@@ -19,6 +19,7 @@ pytestmark = [pytest.mark.browser, pytest.mark.timeout(180)]
 
 SCENARIOS: list[Callable[[Page, SiteServer, Vault], None]] = [
     scenarios.fill_first_candidate,
+    scenarios.fill_field_focused_while_loading,
     scenarios.keyboard_picks_second,
     scenarios.escape_closes_without_filling,
     scenarios.otp_fill,
