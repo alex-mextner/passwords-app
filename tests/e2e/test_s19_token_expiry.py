@@ -26,7 +26,8 @@ def test_s19_expired_token_is_refreshed_silently(stack: Stack) -> None:
     wait_until(lambda: stack.keyring_matches(added), what="sync continuing with a new token")
     assert stack.services.count("/setup/settings") > refreshes
     assert stack.services.count("/gsa") == 0  # no password re-login was needed
-    assert stack.daemon.status()["state"] == "idle"
+    # The keyring can match while the cycle that wrote it is still finishing.
+    wait_until(lambda: stack.daemon.status()["state"] == "idle", what="the daemon back to idle")
     assert not app.signin_banner.get_revealed()
 
 

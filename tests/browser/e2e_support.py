@@ -437,10 +437,16 @@ class FirefoxSession:
         )
 
     def back_to_page(self) -> None:
+        from selenium.common.exceptions import NoSuchWindowException  # noqa: PLC0415
+
         for handle in self.driver.window_handles:
             if handle != self._page_handle:
-                self.driver.switch_to.window(handle)
-                self.driver.close()
+                # The popup closes itself after a fill, possibly after the listing above.
+                try:
+                    self.driver.switch_to.window(handle)
+                    self.driver.close()
+                except NoSuchWindowException:
+                    continue
         self.driver.switch_to.window(self._page_handle)
 
 

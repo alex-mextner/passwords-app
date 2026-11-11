@@ -84,7 +84,13 @@ def test_verification_code_matches_the_daemon_and_counts_down(app: support.AppUn
         )
     )
     assert detail.code_label.get_text() == f"{detail.code[:3]} {detail.code[3:]}"
-    before = detail.ring.seconds_left
+    # Measure away from a period boundary: inside the 1.2 s wait the ring would restart.
+    # Over 6 s left gives a busy runner nearly 5 s of slack; reaching it takes ≤ 6 s.
+    before = support.wait_until(
+        lambda: (left := detail.ring.seconds_left) > 6 and left,
+        timeout=10.0,
+        what="room before the boundary",
+    )
     support.pump(1.2)
     assert 0 < detail.ring.seconds_left < before
 
