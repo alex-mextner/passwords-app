@@ -320,6 +320,15 @@ def _geckodriver_service_class() -> type[Any]:
     return GeckodriverService
 
 
+def _install_temporary_firefox_extension(driver: Any, extension_dir: Path) -> None:
+    """Install temporarily across the declared Selenium >=4.33 range."""
+    install_web_extension = getattr(driver, "install_web_extension", None)
+    if install_web_extension is None:
+        driver.install_addon(str(extension_dir), temporary=True)
+    else:
+        install_web_extension(str(extension_dir), permanent=False)
+
+
 class FirefoxSession:
     """Selenium Firefox (non-snap build) with the extension installed as a temporary add-on."""
 
@@ -359,9 +368,9 @@ class FirefoxSession:
         )
         self.driver = webdriver.Firefox(options=options, service=service)
         self.driver.set_window_size(*VIEWPORT)
-        self.driver.install_addon(str(firefox_dist), temporary=True)
-        # install_addon can return before the background page has started and the content
-        # scripts are registered; a page loaded in that gap gets no content script.
+        _install_temporary_firefox_extension(self.driver, firefox_dist)
+        # Extension installation can return before the background page has started and
+        # content scripts are registered; a page loaded in that gap gets no content script.
         # readyPromise is null once the add-on is ready.
         with self.driver.context(self.driver.CONTEXT_CHROME):
             self.driver.execute_async_script(
