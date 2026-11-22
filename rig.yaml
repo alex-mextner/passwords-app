@@ -89,7 +89,7 @@ github:
     restrict_deletion: true
     require_linear_history: false
     require_signatures: false
-    admin_bypass: true
+    admin_bypass: false
   merge:
     enabled: true
     squash_merge: true
